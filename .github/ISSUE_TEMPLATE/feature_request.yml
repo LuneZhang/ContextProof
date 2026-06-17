@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a ContextProof capability.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What workflow or agent-context issue should this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should ContextProof do?
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Skill workflow
+        - Static audit
+        - Minimized context
+        - Benchmark evidence
+        - CI integration
+        - Documentation

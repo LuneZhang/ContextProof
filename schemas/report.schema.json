@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contextproof.dev/schemas/report.schema.json",
+  "title": "ContextProof Report",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "generated_at",
+    "root",
+    "project_mode",
+    "confidence_state",
+    "static_context_score",
+    "benchmark_evidence",
+    "summary",
+    "context_files",
+    "commands",
+    "findings",
+    "recommendations"
+  ],
+  "properties": {
+    "schema_version": { "type": "string" },
+    "generated_at": { "type": "string" },
+    "root": { "type": "string" },
+    "project_mode": {
+      "type": "string",
+      "enum": ["existing_project_audit", "new_project_bootstrap"]
+    },
+    "confidence_state": {
+      "type": "string",
+      "enum": ["static_only", "benchmark_insufficient", "benchmark_directional", "benchmark_supported"]
+    },
+    "static_context_score": {
+      "type": "object",
+      "required": ["total", "dimensions"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "dimensions": {
+          "type": "object",
+          "required": [
+            "discoverability",
+            "actionability",
+            "minimality",
+            "consistency",
+            "safety",
+            "workflow_fit"
+          ],
+          "properties": {
+            "discoverability": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "actionability": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "minimality": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "consistency": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "safety": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "workflow_fit": { "type": "integer", "minimum": 0, "maximum": 100 }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "benchmark_evidence": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["not_provided", "insufficient_evidence", "directional", "supported", "regression_detected"]
+        },
+        "reason": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "summary": { "type": "object" },
+    "context_files": { "type": "array" },
+    "commands": { "type": "array" },
+    "findings": { "type": "array" },
+    "recommendations": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

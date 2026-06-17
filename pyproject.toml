@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "contextproof"
+version = "0.1.0"
+description = "Audit, minimize, and benchmark repository-level AI agent context files."
+requires-python = ">=3.11"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "ContextProof contributors" }]
+keywords = ["ai-agent", "agent-skills", "codex", "claude-code", "opencode", "agents-md"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://github.com/LuneZhang/ContextProof"
+Repository = "https://github.com/LuneZhang/ContextProof"
+Issues = "https://github.com/LuneZhang/ContextProof/issues"
+
+[project.scripts]
+contextproof = "contextproof.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["contextproof"]
+
+[tool.unittest]
+start-dir = "tests"

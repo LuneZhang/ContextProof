@@ -1,0 +1,31 @@
+name: Bug report
+description: Report a reproducible ContextProof problem.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      description: Commands, repository shape, and relevant context files.
+      placeholder: |
+        contextproof audit . --pr-comment --minimize
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: contextproof 0.1.0
+  - type: textarea
+    id: output
+    attributes:
+      label: Output
+      description: Paste relevant output or findings.
