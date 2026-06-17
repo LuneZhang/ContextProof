@@ -1,6 +1,6 @@
 ---
 name: context-proof
-description: Audit, minimize, and benchmark repository-level AI coding-agent context files with deterministic evidence. Use when an agent needs to evaluate AGENTS.md, CLAUDE.md, SKILL.md, .cursor/rules, MCP notes, or other coding-agent instructions; reduce token waste; detect risky or contradictory rules; generate a lean context candidate; or summarize recorded agent benchmark runs across variants such as none, current, native-init, and contextproof-minimized.
+description: Audit and benchmark repository-level AI coding-agent context files with deterministic evidence. Use when an agent needs to evaluate AGENTS.md, CLAUDE.md, SKILL.md, .cursor/rules, MCP notes, or other coding-agent instructions; detect risky, vague, duplicated, oversized, or contradictory rules; optionally generate a generic starter candidate only when explicitly requested; or summarize recorded agent benchmark runs across variants such as none, current, native-init, and contextproof-minimized.
 ---
 
 # ContextProof
@@ -19,14 +19,14 @@ improves agent performance unless benchmark evidence supports that claim.
 2. Run the bundled deterministic runner from this skill folder:
 
    ```bash
-   python scripts/contextproof.py audit /path/to/repo --pr-comment --minimize
+   python scripts/contextproof.py audit /path/to/repo --pr-comment
    ```
 
    If the `contextproof` CLI is already installed, this equivalent command is
    also acceptable:
 
    ```bash
-   contextproof audit /path/to/repo --pr-comment --minimize
+   contextproof audit /path/to/repo --pr-comment
    ```
 
 3. Review the generated files under `/path/to/repo/.contextproof/`:
@@ -34,15 +34,16 @@ improves agent performance unless benchmark evidence supports that claim.
    - `report.json`
    - `report.md`
    - `pr-comment.md`
-   - `context.min.md`
-   - `minimize-rationale.md`
+   - optional `context.min.md`, only when the user explicitly requests a generic starter candidate
+   - optional `minimize-rationale.md`, only when `context.min.md` is generated
 
-4. Report the static score, confidence state, critical/high findings, and the
-   generated file paths.
+4. Report the static score, confidence state, critical/high findings, evidence,
+   and generated file paths.
 
-5. Treat `context.min.md` as a candidate only. Do not overwrite `AGENTS.md`,
-   `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or other context files unless the
-   user explicitly asks.
+5. If the user explicitly asks for a minimized candidate, rerun audit with
+   `--minimize`. Treat `context.min.md` as a generic candidate only. Do not
+   overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or other
+   context files unless the user explicitly asks.
 
 ## Benchmark Runs
 
@@ -71,4 +72,4 @@ levels. Read `references/context-antipatterns.md` when explaining findings.
 - Lead with static score, confidence state, and critical/high findings.
 - Distinguish static risk from measured benchmark outcomes.
 - Avoid claiming performance improvement unless behavioral run data supports it.
-- Prefer small, concrete context edits to broad rewrites.
+- Do not present deterministic findings as a project-specific rewrite plan.

@@ -1,6 +1,8 @@
 # ContextProof
 
-Audit and improve the instructions your coding agent reads before it edits code.
+Audit the instructions your coding agent reads before it edits code.
+
+[中文 README](README.zh-CN.md)
 
 ContextProof is an open-source agent skill for checking repository-level coding
 agent context: `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, MCP notes,
@@ -13,14 +15,14 @@ After installing the skill, ask your coding agent:
 
 ```text
 Use the context-proof skill to audit this repository's agent context.
-Generate the report, PR comment, and minimized context candidate.
+Generate the report and local PR comment.
 Do not overwrite existing AGENTS.md, CLAUDE.md, or other context files.
 ```
 
 For Codex, the direct form is:
 
 ```text
-Use $context-proof to audit and minimize this repository's agent context.
+Use $context-proof to audit this repository's agent context.
 ```
 
 ContextProof writes local artifacts under `.contextproof/`:
@@ -28,8 +30,11 @@ ContextProof writes local artifacts under `.contextproof/`:
 - `report.json`: machine-readable audit result
 - `report.md`: human-readable audit report
 - `pr-comment.md`: local PR comment text
-- `context.min.md`: minimized context candidate
-- `minimize-rationale.md`: why the candidate was generated
+- `context.min.md`: optional generic starter candidate when explicitly requested
+- `minimize-rationale.md`: why the optional candidate was generated
+
+See [Usage By Agent](docs/USAGE_BY_AGENT.md) for Codex, Claude Code, OpenCode,
+Cursor, Windsurf, Pi, and generic-agent prompts.
 
 ## Why There Is A CLI
 
@@ -41,13 +46,13 @@ agent context only by intuition. The same runner also makes CI, local debugging,
 and reproducible examples possible:
 
 ```bash
-contextproof audit . --pr-comment --minimize
+contextproof audit . --pr-comment
 ```
 
 The CLI is not the primary user experience. The primary experience is: install
 the skill, then ask the coding agent to use it.
 
-## Current V0.1 Features
+## Current V0.1.1 Features
 
 - Portable `context-proof` skill with `SKILL.md`, scripts, references, and assets.
 - Deterministic static audit for agent context files.
@@ -58,10 +63,21 @@ the skill, then ask the coding agent to use it.
   validation commands, and oversized context.
 - Local report generation under `.contextproof/`.
 - Local PR-comment markdown generation.
-- Minimized `AGENTS.md` candidate generation.
+- Optional generic `AGENTS.md` starter candidate when explicitly requested.
 - Benchmark JSONL summary for recorded agent runs.
 - JSON schemas for report and benchmark run data.
 - Optional CLI entry point for CI and manual fallback.
+
+## Try The Demo
+
+Audit an intentionally flawed `AGENTS.md` fixture:
+
+```bash
+python -m contextproof.cli audit examples/bad-agent-context --pr-comment
+```
+
+The report should flag vague rules, over-broad exploration, risky shell text,
+contradictory instructions, and missing validation commands.
 
 ## V0.1 Boundary
 
@@ -146,7 +162,7 @@ Copy-Item -Recurse -Force .\skill\context-proof "$HOME\.codex\skills\context-pro
 Use:
 
 ```text
-Use $context-proof to audit and minimize this repository's agent context.
+Use $context-proof to audit this repository's agent context.
 ```
 
 ### Claude Code
@@ -208,8 +224,7 @@ agent to use the skill folder directly:
 ```text
 Use the ContextProof skill at /path/to/ContextProof/skill/context-proof.
 Audit this repository's agent context, generate `.contextproof/report.md`,
-generate `.contextproof/pr-comment.md`, and create `.contextproof/context.min.md`
-as a candidate only. Do not overwrite existing context files.
+and generate `.contextproof/pr-comment.md`. Do not overwrite existing context files.
 ```
 
 ## Optional CLI Install
@@ -221,27 +236,27 @@ macOS, Linux, WSL:
 
 ```bash
 python3 -m pip install -e .
-contextproof audit /path/to/repo --pr-comment --minimize
+contextproof audit /path/to/repo --pr-comment
 ```
 
 Windows PowerShell:
 
 ```powershell
 py -m pip install -e .
-contextproof audit C:\path\to\repo --pr-comment --minimize
+contextproof audit C:\path\to\repo --pr-comment
 ```
 
 Run without installing:
 
 ```bash
-python -m contextproof.cli audit /path/to/repo --pr-comment --minimize
+python -m contextproof.cli audit /path/to/repo --pr-comment
 ```
 
 ## CLI Commands
 
 ```bash
 contextproof quickstart .
-contextproof audit . --pr-comment --minimize
+contextproof audit . --pr-comment
 contextproof minimize . --output AGENTS.min.md
 contextproof explain .contextproof/report.json
 contextproof summarize-runs examples/benchmark-runs.jsonl
@@ -250,7 +265,7 @@ contextproof summarize-runs examples/benchmark-runs.jsonl
 Strict CI gating is opt-in:
 
 ```bash
-contextproof audit . --fail-under 70 --pr-comment --minimize
+contextproof audit . --fail-under 70 --pr-comment
 ```
 
 The included GitHub workflow writes artifacts by default; it does not fail PRs

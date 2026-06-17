@@ -56,7 +56,7 @@ class ContextProofTests(unittest.TestCase):
             self.assertIn("risky-shell", issue_ids)
             self.assertLessEqual(payload["static_context_score"]["total"], 69)
 
-    def test_killer_audit_command_writes_contextproof_outputs_without_output_dir(self):
+    def test_audit_command_writes_contextproof_outputs_without_output_dir(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Run `pytest` before submitting code.\n", encoding="utf-8")
@@ -65,7 +65,6 @@ class ContextProofTests(unittest.TestCase):
                 "audit",
                 str(root),
                 "--pr-comment",
-                "--minimize",
                 "--deterministic",
             )
             payload = json.loads(result.stdout)
@@ -74,19 +73,36 @@ class ContextProofTests(unittest.TestCase):
                 "report.json",
                 "report.md",
                 "pr-comment.md",
-                "context.min.md",
-                "minimize-rationale.md",
             ]:
                 self.assertTrue((output_dir / name).exists(), name)
             written = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
             self.assertEqual(written["schema_version"], "0.1.0")
             self.assertIn("ContextProof", (output_dir / "pr-comment.md").read_text(encoding="utf-8"))
 
+    def test_bad_agent_context_demo_has_expected_findings(self):
+        fixture = REPO_ROOT / "examples" / "bad-agent-context"
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "contextproof"
+            result = run_cli("audit", str(fixture), "--output-dir", str(output_dir), "--pr-comment")
+            payload = json.loads(result.stdout)
+            issue_ids = {issue["id"] for issue in payload["findings"]}
+            self.assertIn("vague-rule", issue_ids)
+            self.assertIn("overbroad-context", issue_ids)
+            self.assertIn("risky-shell", issue_ids)
+            self.assertIn("conflicting-rule", issue_ids)
+            self.assertIn("Findings", (output_dir / "report.md").read_text(encoding="utf-8"))
+
+    def test_repo_self_audit_ignores_demo_context(self):
+        result = run_cli("audit", str(REPO_ROOT), "--deterministic")
+        payload = json.loads(result.stdout)
+        context_paths = {item["path"] for item in payload["context_files"]}
+        self.assertNotIn("examples/bad-agent-context/AGENTS.md", context_paths)
+
     def test_audit_repo_argument_defaults_to_current_directory(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "AGENTS.md").write_text("Run `pytest` before submitting code.\n", encoding="utf-8")
-            result = run_cli("audit", "--pr-comment", "--minimize", "--deterministic", cwd=root)
+            result = run_cli("audit", "--pr-comment", "--deterministic", cwd=root)
             payload = json.loads(result.stdout)
             self.assertEqual(payload["root"], str(root.resolve()))
             self.assertTrue((root / ".contextproof" / "report.json").exists())

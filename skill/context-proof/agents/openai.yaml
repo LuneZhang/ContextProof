@@ -1,7 +1,7 @@
 name: context-proof
-version: 0.1.0
+version: 0.1.1
 triggers:
-  default_prompt: "Use $context-proof to audit and minimize this repository's AGENTS.md, CLAUDE.md, SKILL.md, and related agent context."
+  default_prompt: "Use $context-proof to audit this repository's AGENTS.md, CLAUDE.md, SKILL.md, and related agent context."
 commands:
-  audit: "python scripts/contextproof.py audit . --pr-comment --minimize"
+  audit: "python scripts/contextproof.py audit . --pr-comment"
   quickstart: "python scripts/contextproof.py quickstart ."

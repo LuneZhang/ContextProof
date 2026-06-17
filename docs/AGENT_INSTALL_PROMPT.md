@@ -18,14 +18,13 @@ After installation, use the context-proof skill to audit this repository's
 agent context. Generate:
 - .contextproof/report.md
 - .contextproof/pr-comment.md
-- .contextproof/context.min.md
 
 Do not overwrite AGENTS.md, CLAUDE.md, .cursor/rules, SKILL.md, or other
-existing context files. Treat context.min.md as a review candidate only.
+existing context files.
 
 If the skill needs a shell runner, install the repository in editable mode with:
 python -m pip install -e .
 
 If the contextproof command is unavailable, run:
-python -m contextproof.cli audit . --pr-comment --minimize
+python -m contextproof.cli audit . --pr-comment
 ```

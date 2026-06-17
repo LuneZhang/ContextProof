@@ -31,6 +31,7 @@ IGNORE_DIRS = {
     ".next",
     ".nuxt",
     "coverage",
+    "examples",
     ".pytest_cache",
     ".mypy_cache",
     ".ruff_cache",
@@ -873,7 +874,7 @@ def command_quickstart(args: argparse.Namespace) -> int:
             print(f"- {item['severity']} {item['id']}: {item['recommendation']}")
     else:
         print("No static findings.")
-    print("Next: contextproof audit . --pr-comment --minimize")
+    print("Next: contextproof audit . --pr-comment")
     return 0
 
 
@@ -913,7 +914,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--md-out", help="Write markdown report to this path.")
     audit.add_argument("--output-dir", help="Write default ContextProof outputs to this directory.")
     audit.add_argument("--pr-comment", action="store_true", help="Write a local PR comment markdown file.")
-    audit.add_argument("--minimize", action="store_true", help="Also write a minimal context candidate.")
+    audit.add_argument("--minimize", action="store_true", help="Also write a generic starter context candidate.")
     audit.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     audit.add_argument(
         "--project-mode",

@@ -16,7 +16,7 @@ body:
       label: Reproduction
       description: Commands, repository shape, and relevant context files.
       placeholder: |
-        contextproof audit . --pr-comment --minimize
+        contextproof audit . --pr-comment
     validations:
       required: true
   - type: input

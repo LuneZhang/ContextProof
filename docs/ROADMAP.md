@@ -7,10 +7,21 @@ Status: complete.
 - Deterministic static audit.
 - Local JSON and markdown reports.
 - Local PR-comment markdown.
-- Minimal context candidate generation.
+- Optional generic context starter candidate generation.
 - Benchmark JSONL summary.
 - Portable `context-proof` skill.
 - Compatibility docs for Codex, Claude Code, OpenCode, and generic agents.
+
+## V0.1.1 Adoption Hardening
+
+Status: complete.
+
+- Skill-first README.
+- Chinese README.
+- Demo fixture for a flawed agent context.
+- Agent-specific usage prompts.
+- Refined reports around deterministic issue detection, evidence, confidence,
+  and severity instead of rewrite planning.
 
 ## V0.2 Benchmark Evidence
 

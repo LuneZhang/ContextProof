@@ -3,7 +3,7 @@
 ## Validation
 
 - [ ] `python -m unittest discover -s tests`
-- [ ] `python -m contextproof.cli audit . --pr-comment --minimize --deterministic`
+- [ ] `python -m contextproof.cli audit . --pr-comment --deterministic`
 
 ## Evidence Policy
 
