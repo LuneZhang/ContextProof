@@ -23,11 +23,17 @@
     "root": { "type": "string" },
     "project_mode": {
       "type": "string",
-      "enum": ["existing_project_audit", "new_project_bootstrap"]
+      "enum": ["existing_project", "new_project", "migration_project"]
     },
     "confidence_state": {
       "type": "string",
-      "enum": ["static_only", "benchmark_insufficient", "benchmark_directional", "benchmark_supported"]
+      "enum": [
+        "static_only",
+        "static_with_insufficient_benchmark",
+        "static_with_mixed_benchmark",
+        "static_with_directional_benchmark",
+        "static_with_supported_benchmark"
+      ]
     },
     "static_context_score": {
       "type": "object",
@@ -63,12 +69,23 @@
       "properties": {
         "status": {
           "type": "string",
-          "enum": ["not_provided", "insufficient_evidence", "directional", "supported", "regression_detected"]
+          "enum": [
+            "not_provided",
+            "insufficient",
+            "mixed",
+            "directional_positive",
+            "directional_negative",
+            "supported_positive",
+            "supported_negative"
+          ]
         },
-        "reason": { "type": "string" }
+        "reason": { "type": "string" },
+        "target_variant": { "type": "string" },
+        "paired_groups": { "type": "integer", "minimum": 0 }
       },
       "additionalProperties": true
     },
+    "benchmark_summary": { "type": "object" },
     "summary": { "type": "object" },
     "context_files": { "type": "array" },
     "commands": { "type": "array" },

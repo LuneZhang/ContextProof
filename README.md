@@ -4,94 +4,101 @@ Audit the instructions your coding agent reads before it edits code.
 
 [中文 README](README.zh-CN.md)
 
-ContextProof is an open-source agent skill for checking repository-level coding
-agent context: `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, MCP notes,
-and similar instruction files. Install the skill in your coding agent, then ask
-the agent to audit the current repository in natural language.
+ContextProof checks agent-facing Markdown such as `AGENTS.md`, `CLAUDE.md`,
+`.cursor/rules`, `SKILL.md`, MCP notes, and persisted `/init` briefs before
+they are injected into a coding agent's prompt context.
 
-## Primary Use
+ContextProof is not a general Markdown optimizer or linter. It only audits
+Markdown that is loaded as coding-agent context.
 
-After installing the skill, ask your coding agent:
+It looks for instructions that are vague, contradictory, unsafe, too broad,
+hard to validate, or wasteful for the model to carry on every task.
+
+## Copy Into Your Agent
 
 ```text
+Install ContextProof from https://github.com/LuneZhang/ContextProof.
 Use the context-proof skill to audit this repository's agent context.
-Generate the report and local PR comment.
-Do not overwrite existing AGENTS.md, CLAUDE.md, or other context files.
+Generate .contextproof/report.md and .contextproof/pr-comment.md.
+Do not overwrite AGENTS.md, CLAUDE.md, .cursor/rules, SKILL.md, or other context files.
 ```
 
-For Codex, the direct form is:
+Codex direct form after installing the skill:
 
 ```text
 Use $context-proof to audit this repository's agent context.
 ```
+
+Expected output:
+
+```text
+Static context score: 62 / 100
+Benchmark evidence: not_provided
+
+Findings:
+- [critical] risky-shell: unsafe shell pattern in AGENTS.md
+- [high] overbroad-context: asks the agent to read the entire repository
+- [high] missing-test-command: no validation command discovered
+
+Generated:
+- .contextproof/report.md
+- .contextproof/pr-comment.md
+```
+
+## Try The Demo
+
+```bash
+git clone https://github.com/LuneZhang/ContextProof.git
+cd ContextProof
+python -m contextproof.cli audit examples/bad-agent-context --pr-comment
+```
+
+The demo flags vague rules, over-broad exploration, risky shell text,
+contradictory instructions, and missing validation commands.
+
+## After Editing Agent Context
+
+Run ContextProof after changing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
+`.cursor/rules`, `SKILL.md`, MCP notes, or other persisted agent instructions:
+
+```bash
+contextproof audit . --pr-comment
+```
+
+If the change is part of a PR, use `.contextproof/pr-comment.md` as the local
+review summary for the context change.
+
+## What It Audits
+
+| Audited | Not Audited |
+| --- | --- |
+| Persistent instructions a coding agent actually reads | General project documentation |
+| `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` | Ordinary README or design docs |
+| `.cursor/rules/*.{md,mdc,txt}` | Markdown that is never injected into agent context |
+| `.github/copilot-instructions.md` | One-off chat prompts not saved as context |
+| `SKILL.md`, MCP notes, agent notes | Native `/init` output unless saved as a context file |
+
+ContextProof does not run Codex, Claude Code, OpenCode, Cursor, Gemini,
+Copilot, or Pi. It audits local context files and writes local reports.
+
+## Core Output
 
 ContextProof writes local artifacts under `.contextproof/`:
 
 - `report.json`: machine-readable audit result
 - `report.md`: human-readable audit report
 - `pr-comment.md`: local PR comment text
-- `context.min.md`: optional generic starter candidate when explicitly requested
-- `minimize-rationale.md`: why the optional candidate was generated
 
-See [Usage By Agent](docs/USAGE_BY_AGENT.md) for Codex, Claude Code, OpenCode,
-Cursor, Windsurf, Pi, and generic-agent prompts.
+The static audit reports:
 
-## Why There Is A CLI
+- six-dimension score: discoverability, actionability, minimality, consistency,
+  safety, and workflow fit
+- findings for vague rules, over-broad exploration, risky shell text,
+  prompt-injection-like language, duplicate rules, contradictions, missing
+  validation commands, and oversized context
+- recommendations for what a human or agent should inspect next
 
-ContextProof is skill-first. The CLI exists as the deterministic runner that
-the skill can call.
-
-That gives the agent a reliable execution path instead of asking it to judge
-agent context only by intuition. The same runner also makes CI, local debugging,
-and reproducible examples possible:
-
-```bash
-contextproof audit . --pr-comment
-```
-
-The CLI is not the primary user experience. The primary experience is: install
-the skill, then ask the coding agent to use it.
-
-## Current V0.1.1 Features
-
-- Portable `context-proof` skill with `SKILL.md`, scripts, references, and assets.
-- Deterministic static audit for agent context files.
-- Six-dimension static score: discoverability, actionability, minimality,
-  consistency, safety, and workflow fit.
-- Detection for vague rules, over-broad exploration rules, risky shell text,
-  prompt-injection-like language, duplicated rules, contradictions, missing
-  validation commands, and oversized context.
-- Local report generation under `.contextproof/`.
-- Local PR-comment markdown generation.
-- Optional generic `AGENTS.md` starter candidate when explicitly requested.
-- Benchmark JSONL summary for recorded agent runs.
-- JSON schemas for report and benchmark run data.
-- Optional CLI entry point for CI and manual fallback.
-
-## Try The Demo
-
-Audit an intentionally flawed `AGENTS.md` fixture:
-
-```bash
-python -m contextproof.cli audit examples/bad-agent-context --pr-comment
-```
-
-The report should flag vague rules, over-broad exploration, risky shell text,
-contradictory instructions, and missing validation commands.
-
-## V0.1 Boundary
-
-This release is intentionally narrow:
-
-- It does not run Codex, Claude Code, OpenCode, Cursor, Gemini, Copilot, or Pi.
-- It does not call the GitHub API.
-- It does not claim a static score proves real agent performance improvement.
-- It does not automatically overwrite existing context files.
-
-Behavioral claims require recorded benchmark runs. V0.1 can summarize those run
-records, but it does not collect them automatically.
-
-## Install
+## Install The Skill
 
 Python 3.11 or newer is required for the bundled deterministic runner.
 
@@ -107,40 +114,6 @@ Windows PowerShell:
 ```powershell
 git clone https://github.com/LuneZhang/ContextProof.git
 cd ContextProof
-```
-
-### Install The Skill
-
-Agent-portable global location:
-
-macOS, Linux, WSL:
-
-```bash
-mkdir -p ~/.agents/skills
-cp -R skill/context-proof ~/.agents/skills/context-proof
-```
-
-Windows PowerShell:
-
-```powershell
-New-Item -ItemType Directory -Force "$HOME\.agents\skills" | Out-Null
-Copy-Item -Recurse -Force .\skill\context-proof "$HOME\.agents\skills\context-proof"
-```
-
-Shortcut scripts:
-
-```bash
-sh scripts/install-contextproof-skill.sh agents
-sh scripts/install-contextproof-skill.sh codex
-sh scripts/install-contextproof-skill.sh claude
-sh scripts/install-contextproof-skill.sh opencode
-```
-
-```powershell
-.\scripts\install-contextproof-skill.ps1 -Scope agents
-.\scripts\install-contextproof-skill.ps1 -Scope codex
-.\scripts\install-contextproof-skill.ps1 -Scope claude
-.\scripts\install-contextproof-skill.ps1 -Scope opencode
 ```
 
 ### Codex
@@ -218,16 +191,25 @@ Load the context-proof skill and audit this repository's agent context.
 
 ### Other Coding Agents
 
-For Pi coding agent and agents without native `SKILL.md` discovery, ask the
-agent to use the skill folder directly:
+| Agent surface | Recommended path |
+| --- | --- |
+| Codex | Native skill path |
+| Claude Code | Native or project-local skill path |
+| OpenCode | Native or project-local skill path |
+| Cursor, Windsurf, Pi | Give the agent the skill folder path |
+| Any shell-capable agent | Use the CLI fallback |
+
+Prompt fallback:
 
 ```text
 Use the ContextProof skill at /path/to/ContextProof/skill/context-proof.
-Audit this repository's agent context, generate `.contextproof/report.md`,
-and generate `.contextproof/pr-comment.md`. Do not overwrite existing context files.
+Audit this repository's agent context. Generate .contextproof/report.md and
+.contextproof/pr-comment.md. Do not overwrite existing context files.
 ```
 
-## Optional CLI Install
+See [Usage By Agent](docs/USAGE_BY_AGENT.md) for more prompts.
+
+## Optional CLI
 
 Install the CLI when you want a shell command, CI job, or fallback path for an
 agent that can run Python but cannot load skills directly.
@@ -252,15 +234,60 @@ Run without installing:
 python -m contextproof.cli audit /path/to/repo --pr-comment
 ```
 
-## CLI Commands
+## Project Modes
+
+| Mode | Use When | V0.2 Behavior |
+| --- | --- | --- |
+| `existing_project` | The repository already has code and workflows | Default audit mode |
+| `new_project` | You are bootstrapping a fresh repository | Missing context is reported with lower severity |
+| `migration_project` | You are migrating rules between agents or stacks | Accepted for reporting and benchmark labeling |
+
+Example:
 
 ```bash
-contextproof quickstart .
-contextproof audit . --pr-comment
-contextproof minimize . --output AGENTS.min.md
-contextproof explain .contextproof/report.json
-contextproof summarize-runs examples/benchmark-runs.jsonl
+python -m contextproof.cli audit . --project-mode new_project --pr-comment
 ```
+
+## Advanced
+
+### Benchmark Evidence
+
+ContextProof separates static hygiene from behavioral evidence. A static score
+does not prove agents will perform better. Behavioral claims require recorded
+paired run data.
+
+Canonical variants:
+
+- `none`: no repository context file injected
+- `current`: the repository's current context files
+- `native-init`: a tool's default generated context from an `/init`-style flow
+- `contextproof-reviewed`: context after a human or agent reviews
+  ContextProof findings and makes explicit changes
+
+Summarize local JSONL runs:
+
+```bash
+contextproof summarize-runs examples/benchmark-runs.jsonl \
+  --md-out .contextproof/benchmark-summary.md
+```
+
+Merge recorded runs into an audit report:
+
+```bash
+contextproof audit . --runs examples/benchmark-runs.jsonl --pr-comment
+```
+
+### Starter Scaffold
+
+`contextproof minimize` writes a generic starter scaffold only when explicitly
+requested. It is not a project-specific rewrite and does not replace existing
+context files.
+
+```bash
+contextproof minimize . --output AGENTS.starter.md
+```
+
+### CI
 
 Strict CI gating is opt-in:
 
@@ -271,42 +298,13 @@ contextproof audit . --fail-under 70 --pr-comment
 The included GitHub workflow writes artifacts by default; it does not fail PRs
 on static score unless `--fail-under` is added.
 
-## Benchmark Data
-
-ContextProof separates static hygiene from behavioral evidence. A static score
-does not claim agents will perform better. Behavioral claims require recorded
-paired run data with fields such as:
-
-- `task_id`
-- `variant`
-- `paired_group_id`
-- `agent`
-- `model`
-- `repo_snapshot`
-- `success`
-- `tests_passed`
-- `tokens_input`
-- `tokens_output`
-- `duration_seconds`
-- `files_read`
-- `files_changed`
-- `commands_run`
-- `instruction_violations`
-
-Summarize local JSONL runs:
-
-```bash
-contextproof summarize-runs examples/benchmark-runs.jsonl \
-  --md-out .contextproof/benchmark-summary.md
-```
-
 ## Repository Layout
 
 ```text
 contextproof/                 Python package and CLI implementation
 skill/context-proof/          Portable agent skill
 schemas/                      JSON schemas for reports and benchmark runs
-examples/                     Example benchmark JSONL
+examples/                     Example benchmark JSONL and demo fixture
 integrations/                 Optional command templates for specific agents
 tests/                        Unit tests
 ```

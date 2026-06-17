@@ -25,11 +25,14 @@ Status: complete.
 
 ## V0.2 Benchmark Evidence
 
+Status: complete.
+
 - Paired benchmark grouping.
 - Directional and supported evidence states.
 - Baseline comparison across `none`, `current`, `native-init`, and
-  `contextproof-minimized`.
+  `contextproof-reviewed`.
 - Better uncertainty reporting.
+- `audit --runs` support for merging behavioral evidence into static reports.
 
 ## V0.3 CI And Review UX
 
@@ -47,5 +50,5 @@ Status: complete.
 ## V0.5 Optimization Loop
 
 - Fixture-driven scorer calibration.
-- Minifier regression tests.
+- Generic starter-candidate regression tests.
 - Optional LLM advisory rewrites that never replace deterministic scoring.

@@ -13,6 +13,8 @@ Goal:
 - Prefer the agent's native global skill location when available.
 - Otherwise install the skill project-locally.
 - Ensure the deterministic runner can execute with Python 3.11+.
+- Treat ContextProof as an auditor for agent-facing Markdown context, not as a
+  general Markdown optimizer.
 
 After installation, use the context-proof skill to audit this repository's
 agent context. Generate:

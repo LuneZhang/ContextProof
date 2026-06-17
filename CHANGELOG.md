@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Added paired benchmark grouping and comparison summaries.
+- Added benchmark evidence states: insufficient, mixed, directional, and supported.
+- Added `audit --runs` to merge recorded behavioral evidence into audit reports.
+- Added canonical `existing_project`, `new_project`, and `migration_project` modes.
+- Renamed the benchmark improvement variant to `contextproof-reviewed`.
+- Documented ContextProof's core scope as agent-facing Markdown context, not arbitrary Markdown.
+- Refined README positioning around a copy-and-run audit loop and moved advanced features out of the primary path.
+
 ## 0.1.1
 
 - Added a skill-first usage guide and Chinese README.

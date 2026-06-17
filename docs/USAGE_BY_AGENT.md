@@ -3,6 +3,19 @@
 ContextProof is skill-first. Install `skill/context-proof`, then ask the coding
 agent to use it in natural language.
 
+ContextProof is not a general Markdown optimizer. It only audits Markdown that
+is loaded as coding-agent context.
+
+## Support Levels
+
+| Agent surface | Recommended path |
+| --- | --- |
+| Codex | Native skill path |
+| Claude Code | Native or project-local skill path |
+| OpenCode | Native or project-local skill path |
+| Cursor, Windsurf, Pi | Give the agent the skill folder path |
+| Any shell-capable agent | Use the CLI fallback |
+
 ## Codex
 
 Install:
@@ -70,6 +83,12 @@ If the agent cannot run a skill folder directly, install the CLI fallback:
 python -m pip install -e /path/to/ContextProof
 contextproof audit . --pr-comment
 ```
+
+## Project Mode
+
+Default to `existing_project`. For fresh repositories, ask the agent to use
+`--project-mode new_project`. For migrations between agents or stacks, use
+`--project-mode migration_project` for reporting and benchmark labeling.
 
 ## What The Agent Should Report
 

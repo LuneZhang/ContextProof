@@ -47,8 +47,8 @@ class ContextProofTests(unittest.TestCase):
             result = run_cli("audit", str(root), "--deterministic")
             payload = json.loads(result.stdout)
             issue_ids = {issue["id"] for issue in payload["findings"]}
-            self.assertEqual(payload["schema_version"], "0.1.0")
-            self.assertEqual(payload["project_mode"], "existing_project_audit")
+            self.assertEqual(payload["schema_version"], "0.2.0")
+            self.assertEqual(payload["project_mode"], "existing_project")
             self.assertEqual(payload["confidence_state"], "static_only")
             self.assertEqual(payload["benchmark_evidence"]["status"], "not_provided")
             self.assertIn("vague-rule", issue_ids)
@@ -76,7 +76,7 @@ class ContextProofTests(unittest.TestCase):
             ]:
                 self.assertTrue((output_dir / name).exists(), name)
             written = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
-            self.assertEqual(written["schema_version"], "0.1.0")
+            self.assertEqual(written["schema_version"], "0.2.0")
             self.assertIn("ContextProof", (output_dir / "pr-comment.md").read_text(encoding="utf-8"))
 
     def test_bad_agent_context_demo_has_expected_findings(self):
@@ -157,12 +157,130 @@ class ContextProofTests(unittest.TestCase):
             )
             result = run_cli("summarize-runs", str(runs), "--md-out", str(md_out), "--json-out", str(json_out))
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["benchmark_evidence"]["status"], "insufficient_evidence")
+            self.assertEqual(payload["benchmark_evidence"]["status"], "insufficient")
             self.assertEqual(payload["variants"]["none"]["avg_tokens_input"], 10)
             self.assertEqual(payload["variants"]["current"]["avg_tokens_input"], 20)
             self.assertEqual(payload["variants"]["current"]["avg_files_changed"], 4)
-            self.assertIn("Evidence status: `insufficient_evidence`", md_out.read_text(encoding="utf-8"))
+            self.assertIn("Evidence status: `insufficient`", md_out.read_text(encoding="utf-8"))
             self.assertTrue(json_out.exists())
+
+    def test_summarize_runs_infers_directional_positive_from_paired_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp) / "runs.jsonl"
+            lines = []
+            for index in range(1, 4):
+                group = f"task-{index}"
+                lines.append(
+                    json.dumps(
+                        {
+                            "schema_version": "0.2.0",
+                            "run_id": f"current-{index}",
+                            "paired_group_id": group,
+                            "task_id": group,
+                            "project_mode": "existing_project",
+                            "variant": "current",
+                            "agent": "codex",
+                            "model": "unspecified",
+                            "repo_snapshot": "git:test",
+                            "run_order": 1,
+                            "success": False,
+                            "tests_passed": False,
+                            "tokens_input": 15000,
+                            "duration_seconds": 900,
+                            "human_intervention": True,
+                        }
+                    )
+                )
+                lines.append(
+                    json.dumps(
+                        {
+                            "schema_version": "0.2.0",
+                            "run_id": f"reviewed-{index}",
+                            "paired_group_id": group,
+                            "task_id": group,
+                            "project_mode": "existing_project",
+                            "variant": "contextproof-reviewed",
+                            "agent": "codex",
+                            "model": "unspecified",
+                            "repo_snapshot": "git:test",
+                            "run_order": 2,
+                            "success": True,
+                            "tests_passed": True,
+                            "tokens_input": 9000,
+                            "duration_seconds": 600,
+                            "human_intervention": False,
+                        }
+                    )
+                )
+            runs.write_text("\n".join(lines), encoding="utf-8")
+            payload = json.loads(run_cli("summarize-runs", str(runs), "--deterministic").stdout)
+            self.assertEqual(payload["benchmark_evidence"]["status"], "directional_positive")
+            self.assertEqual(payload["target_variant"], "contextproof-reviewed")
+            self.assertEqual(payload["comparisons"][0]["paired_groups"], 3)
+
+    def test_audit_merges_benchmark_runs_into_report(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            (root / "AGENTS.md").write_text("Run `pytest` before submitting code.\n", encoding="utf-8")
+            runs = Path(tmp) / "runs.jsonl"
+            rows = []
+            for index in range(1, 4):
+                rows.append(
+                    json.dumps(
+                        {
+                            "run_id": f"base-{index}",
+                            "paired_group_id": f"task-{index}",
+                            "task_id": f"task-{index}",
+                            "project_mode": "existing_project",
+                            "variant": "current",
+                            "agent": "codex",
+                            "model": "unspecified",
+                            "repo_snapshot": "git:test",
+                            "run_order": 1,
+                            "success": False,
+                            "tests_passed": False,
+                        }
+                    )
+                )
+                rows.append(
+                    json.dumps(
+                        {
+                            "run_id": f"reviewed-{index}",
+                            "paired_group_id": f"task-{index}",
+                            "task_id": f"task-{index}",
+                            "project_mode": "existing_project",
+                            "variant": "contextproof-reviewed",
+                            "agent": "codex",
+                            "model": "unspecified",
+                            "repo_snapshot": "git:test",
+                            "run_order": 2,
+                            "success": True,
+                            "tests_passed": True,
+                        }
+                    )
+                )
+            runs.write_text("\n".join(rows), encoding="utf-8")
+            result = run_cli("audit", str(root), "--runs", str(runs), "--pr-comment", "--deterministic")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["confidence_state"], "static_with_directional_benchmark")
+            self.assertEqual(payload["benchmark_evidence"]["status"], "directional_positive")
+            self.assertTrue((root / ".contextproof" / "benchmark-summary.md").exists())
+
+    def test_malformed_benchmark_jsonl_returns_input_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            runs = Path(tmp) / "runs.jsonl"
+            runs.write_text('{"task_id":"a"}\nnot-json\n', encoding="utf-8")
+            result = run_cli("summarize-runs", str(runs), check=False)
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Invalid JSON on line 2", result.stderr)
+
+    def test_official_benchmark_example_has_directional_evidence(self):
+        result = run_cli("summarize-runs", str(REPO_ROOT / "examples" / "benchmark-runs.jsonl"), "--deterministic")
+        payload = json.loads(result.stdout)
+        self.assertEqual(payload["run_count"], 12)
+        self.assertEqual(payload["paired_group_count"], 3)
+        self.assertEqual(payload["benchmark_evidence"]["status"], "directional_positive")
 
     def test_schema_enums_match_v0_contract(self):
         report_schema = json.loads((REPO_ROOT / "schemas" / "report.schema.json").read_text(encoding="utf-8"))
@@ -170,21 +288,42 @@ class ContextProofTests(unittest.TestCase):
         evidence_enum = set(report_schema["properties"]["benchmark_evidence"]["properties"]["status"]["enum"])
         self.assertEqual(
             confidence_enum,
-            {"static_only", "benchmark_insufficient", "benchmark_directional", "benchmark_supported"},
+            {
+                "static_only",
+                "static_with_insufficient_benchmark",
+                "static_with_mixed_benchmark",
+                "static_with_directional_benchmark",
+                "static_with_supported_benchmark",
+            },
         )
         self.assertEqual(
             evidence_enum,
-            {"not_provided", "insufficient_evidence", "directional", "supported", "regression_detected"},
+            {
+                "not_provided",
+                "insufficient",
+                "mixed",
+                "directional_positive",
+                "directional_negative",
+                "supported_positive",
+                "supported_negative",
+            },
         )
 
-    def test_new_project_bootstrap_mode_is_reported(self):
+    def test_new_project_mode_is_reported(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            result = run_cli("audit", str(root), "--project-mode", "new_project", "--deterministic")
+            payload = json.loads(result.stdout)
+            self.assertEqual(payload["project_mode"], "new_project")
+            missing = [item for item in payload["findings"] if item["id"] == "missing-agent-context"]
+            self.assertEqual(missing[0]["severity"], "medium")
+
+    def test_legacy_project_mode_alias_is_normalized(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             result = run_cli("audit", str(root), "--project-mode", "new_project_bootstrap", "--deterministic")
             payload = json.loads(result.stdout)
-            self.assertEqual(payload["project_mode"], "new_project_bootstrap")
-            missing = [item for item in payload["findings"] if item["id"] == "missing-agent-context"]
-            self.assertEqual(missing[0]["severity"], "medium")
+            self.assertEqual(payload["project_mode"], "new_project")
 
 
 if __name__ == "__main__":

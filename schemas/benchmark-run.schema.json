@@ -3,13 +3,17 @@
   "$id": "https://contextproof.dev/schemas/benchmark-run.schema.json",
   "title": "ContextProof Benchmark Run",
   "type": "object",
-  "required": ["schema_version", "run_id", "paired_group_id", "task_id", "variant", "agent", "model", "repo_snapshot", "run_order", "success"],
+  "required": ["schema_version", "run_id", "paired_group_id", "task_id", "project_mode", "variant", "agent", "model", "repo_snapshot", "run_order", "success"],
   "properties": {
     "schema_version": { "type": "string" },
     "run_id": { "type": "string" },
     "paired_group_id": { "type": "string" },
     "repeat_index": { "type": "integer", "minimum": 0 },
     "task_id": { "type": "string" },
+    "project_mode": {
+      "type": "string",
+      "enum": ["existing_project", "new_project", "migration_project"]
+    },
     "variant": { "type": "string" },
     "agent": { "type": "string" },
     "agent_version": { "type": "string" },
@@ -27,6 +31,8 @@
     "tokens_input": { "type": "number", "minimum": 0 },
     "tokens_output": { "type": "number", "minimum": 0 },
     "duration_seconds": { "type": "number", "minimum": 0 },
+    "turns": { "type": "number", "minimum": 0 },
+    "human_intervention": { "type": "boolean" },
     "files_read": { "type": "number", "minimum": 0 },
     "files_changed": { "type": "number", "minimum": 0 },
     "commands_run": { "type": "array", "items": { "type": "string" } },

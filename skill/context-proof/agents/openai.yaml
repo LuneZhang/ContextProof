@@ -1,5 +1,5 @@
 name: context-proof
-version: 0.1.1
+version: 0.2.0
 triggers:
   default_prompt: "Use $context-proof to audit this repository's AGENTS.md, CLAUDE.md, SKILL.md, and related agent context."
 commands:

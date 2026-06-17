@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "0.1.0"
+SCHEMA_VERSION = "0.2.0"
 
 IGNORE_DIRS = {
     ".git",
@@ -106,6 +106,31 @@ DIMENSION_WEIGHTS = {
     "workflow_fit": 15.0,
 }
 
+PROJECT_MODE_ALIASES = {
+    "existing_project_audit": "existing_project",
+    "new_project_bootstrap": "new_project",
+}
+
+PROJECT_MODES = {"existing_project", "new_project", "migration_project"}
+
+VARIANT_ALIASES = {
+    "contextproof-minimized": "contextproof-reviewed",
+    "contextproof-minified": "contextproof-reviewed",
+    "contextproof-optimized": "contextproof-reviewed",
+}
+
+PRIMARY_VARIANT_ORDER = ["contextproof-reviewed", "current", "native-init", "none"]
+
+EVIDENCE_STATUS_TO_CONFIDENCE = {
+    "not_provided": "static_only",
+    "insufficient": "static_with_insufficient_benchmark",
+    "mixed": "static_with_mixed_benchmark",
+    "directional_positive": "static_with_directional_benchmark",
+    "directional_negative": "static_with_directional_benchmark",
+    "supported_positive": "static_with_supported_benchmark",
+    "supported_negative": "static_with_supported_benchmark",
+}
+
 
 class ContextProofInputError(Exception):
     """Raised when user-provided input cannot be processed."""
@@ -190,7 +215,7 @@ def add_global_issues(
 ) -> None:
     total_tokens = sum(item.token_estimate for item in context_files)
     if not context_files:
-        severity = "medium" if project_mode == "new_project_bootstrap" else "high"
+        severity = "medium" if normalize_project_mode(project_mode) == "new_project" else "high"
         issues.append(
             Issue(
                 "missing-agent-context",
@@ -248,6 +273,53 @@ def estimate_tokens(text: str) -> int:
 
 def rel(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
+
+
+def normalize_project_mode(value: str | None) -> str:
+    normalized = PROJECT_MODE_ALIASES.get(value or "", value or "existing_project")
+    if normalized not in PROJECT_MODES:
+        return "existing_project"
+    return normalized
+
+
+def normalize_variant(value: Any) -> str:
+    raw = str(value or "unknown").strip()
+    return VARIANT_ALIASES.get(raw, raw)
+
+
+def bool_metric(row: dict[str, Any], key: str) -> bool | None:
+    if key not in row or row[key] is None:
+        return None
+    value = row[key]
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "1", "pass", "passed", "success"}:
+            return True
+        if lowered in {"false", "no", "0", "fail", "failed", "failure"}:
+            return False
+    return bool(value)
+
+
+def numeric_metric(row: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        value = row.get(key)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            return float(len(value))
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def mean_or_none(values: list[float]) -> float | None:
+    return statistics.fmean(values) if values else None
 
 
 def read_text(path: Path, max_bytes: int = 512_000) -> str:
@@ -560,38 +632,54 @@ def build_recommendations(context_files: list[ContextFile], commands: list[Comma
     return recommendations
 
 
-def audit_repo(root: Path, deterministic: bool = False, project_mode: str = "existing_project_audit") -> dict[str, Any]:
+def audit_repo(
+    root: Path,
+    deterministic: bool = False,
+    project_mode: str = "existing_project",
+    runs_path: Path | None = None,
+) -> dict[str, Any]:
+    normalized_project_mode = normalize_project_mode(project_mode)
     context_files, issues, duplicates = analyze_context(root)
     commands = discover_commands(root)
-    add_global_issues(context_files, commands, issues, project_mode)
+    add_global_issues(context_files, commands, issues, normalized_project_mode)
     scoring = aggregate_score(context_files, commands, issues)
     generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
-    return {
+    benchmark_summary = summarize_runs(runs_path, deterministic=deterministic) if runs_path else None
+    benchmark_evidence = (
+        benchmark_summary["benchmark_evidence"]
+        if benchmark_summary
+        else {
+            "status": "not_provided",
+            "reason": "No paired benchmark runs were provided.",
+        }
+    )
+    report = {
         "schema_version": SCHEMA_VERSION,
         "generated_at": generated_at,
         "root": str(root.resolve()),
-        "project_mode": project_mode,
-        "confidence_state": "static_only",
+        "project_mode": normalized_project_mode,
+        "confidence_state": EVIDENCE_STATUS_TO_CONFIDENCE.get(benchmark_evidence["status"], "static_only"),
         "static_context_score": {
             "total": scoring["total"],
             "dimensions": scoring["dimensions"],
         },
-        "benchmark_evidence": {
-            "status": "not_provided",
-            "reason": "No paired benchmark runs were provided.",
-        },
+        "benchmark_evidence": benchmark_evidence,
         "summary": {
             "context_file_count": len(context_files),
             "total_context_tokens": sum(item.token_estimate for item in context_files),
             "command_count": len(commands),
             "issue_count": len(issues),
             "duplicate_rule_count": len(duplicates),
+            "benchmark_run_count": benchmark_summary["run_count"] if benchmark_summary else 0,
         },
         "context_files": [asdict(item) for item in context_files],
         "commands": [asdict(item) for item in commands],
         "findings": [finding_from_issue(item) for item in issues],
         "recommendations": build_recommendations(context_files, commands, issues),
     }
+    if benchmark_summary:
+        report["benchmark_summary"] = benchmark_summary
+    return report
 
 
 def render_markdown_report(report: dict[str, Any]) -> str:
@@ -601,6 +689,7 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         "",
         f"Static context score: {static_score['total']} / 100",
         f"Confidence state: {report['confidence_state']}",
+        f"Benchmark evidence: {report['benchmark_evidence']['status']}",
         "",
         "## Summary",
         "",
@@ -614,13 +703,21 @@ def render_markdown_report(report: dict[str, Any]) -> str:
     ]
     for name, value in static_score["dimensions"].items():
         lines.append(f"- {name}: {value}")
+    lines.extend(["", "## Benchmark Evidence", ""])
+    evidence = report["benchmark_evidence"]
+    lines.append(f"- Status: `{evidence['status']}`")
+    lines.append(f"- Reason: {evidence.get('reason', 'No benchmark evidence note provided.')}")
+    if "target_variant" in evidence:
+        lines.append(f"- Target variant: `{evidence['target_variant']}`")
+    if "paired_groups" in evidence:
+        lines.append(f"- Paired groups: {evidence['paired_groups']}")
     lines.extend(["", "## Findings", ""])
     if report["findings"]:
         for issue in report["findings"]:
             lines.append(f"- [{issue['severity']}] {issue['id']} in {issue['path']}: {issue['rationale']}")
             if issue["evidence"]:
                 lines.append(f"  Evidence: {issue['evidence']}")
-            lines.append(f"  Fix: {issue['recommendation']}")
+            lines.append(f"  Recommendation: {issue['recommendation']}")
     else:
         lines.append("- No static findings.")
     lines.extend(["", "## Commands", ""])
@@ -645,6 +742,7 @@ def render_pr_comment(report: dict[str, Any]) -> str:
         "",
         f"- Static context score: **{score}/100**",
         f"- Confidence: `{report['confidence_state']}`",
+        f"- Benchmark evidence: `{report['benchmark_evidence']['status']}`",
         f"- Findings: {len(findings)} total, {len(high_findings)} critical/high",
         "",
     ]
@@ -727,7 +825,29 @@ def write_outputs(payload: dict[str, Any], json_out: str | None, md_out: str | N
         target.write_text(render_markdown_report(payload), encoding="utf-8")
 
 
-def summarize_runs(path: Path) -> dict[str, Any]:
+def normalize_run(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    normalized["variant"] = normalize_variant(row.get("variant"))
+    normalized["project_mode"] = normalize_project_mode(str(row.get("project_mode") or "existing_project"))
+    normalized["paired_group_id"] = str(
+        row.get("paired_group_id") or row.get("task_id") or row.get("run_id") or "unpaired"
+    )
+    normalized["success"] = bool_metric(row, "success")
+    normalized["tests_passed"] = bool_metric(row, "tests_passed")
+    normalized["human_intervention"] = bool_metric(row, "human_intervention")
+    normalized["tokens_input"] = numeric_metric(row, "tokens_input", "input_tokens")
+    normalized["tokens_output"] = numeric_metric(row, "tokens_output", "output_tokens")
+    normalized["duration_seconds"] = numeric_metric(row, "duration_seconds")
+    normalized["files_read"] = numeric_metric(row, "files_read")
+    normalized["files_changed"] = numeric_metric(row, "files_changed", "files_touched")
+    normalized["turns"] = numeric_metric(row, "turns", "turn_count")
+    normalized["commands_run_count"] = numeric_metric(row, "commands_run_count", "commands_run")
+    violations = row.get("instruction_violations")
+    normalized["instruction_violation_count"] = len(violations) if isinstance(violations, list) else numeric_metric(row, "instruction_violations")
+    return normalized
+
+
+def load_runs(path: Path) -> list[dict[str, Any]]:
     if not path.exists() or not path.is_file():
         raise ContextProofInputError(f"Benchmark runs file does not exist: {path}")
     rows: list[dict[str, Any]] = []
@@ -735,54 +855,207 @@ def summarize_runs(path: Path) -> dict[str, Any]:
         if not line.strip():
             continue
         try:
-            rows.append(json.loads(line))
+            raw = json.loads(line)
         except json.JSONDecodeError as exc:
             raise ContextProofInputError(f"Invalid JSON on line {number}: {exc}") from exc
-    variants: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        variants.setdefault(str(row.get("variant", "unknown")), []).append(row)
+        if not isinstance(raw, dict):
+            raise ContextProofInputError(f"Benchmark run on line {number} must be a JSON object.")
+        rows.append(normalize_run(raw))
+    return rows
 
-    summary: dict[str, Any] = {
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "benchmark_evidence": {
-            "status": "insufficient_evidence",
-            "reason": "Recorded runs were summarized without paired-group inference.",
-        },
-        "run_count": len(rows),
-        "variants": {},
+
+def variant_metrics(items: list[dict[str, Any]]) -> dict[str, Any]:
+    successes = [float(value) for row in items if (value := row.get("success")) is not None]
+    tests = [float(value) for row in items if (value := row.get("tests_passed")) is not None]
+    interventions = [float(value) for row in items if (value := row.get("human_intervention")) is not None]
+    tokens_input = [float(value) for row in items if (value := row.get("tokens_input")) is not None]
+    tokens_output = [float(value) for row in items if (value := row.get("tokens_output")) is not None]
+    durations = [float(value) for row in items if (value := row.get("duration_seconds")) is not None]
+    files_read = [float(value) for row in items if (value := row.get("files_read")) is not None]
+    files_changed = [float(value) for row in items if (value := row.get("files_changed")) is not None]
+    turns = [float(value) for row in items if (value := row.get("turns")) is not None]
+    commands = [float(value) for row in items if (value := row.get("commands_run_count")) is not None]
+    violations = [float(value) for row in items if (value := row.get("instruction_violation_count")) is not None]
+    project_modes = sorted({str(row.get("project_mode", "existing_project")) for row in items})
+    return {
+        "runs": len(items),
+        "project_modes": project_modes,
+        "success_rate": mean_or_none(successes) or 0.0,
+        "tests_pass_rate": mean_or_none(tests),
+        "human_intervention_rate": mean_or_none(interventions),
+        "avg_tokens_input": mean_or_none(tokens_input),
+        "avg_tokens_output": mean_or_none(tokens_output),
+        "avg_duration_seconds": mean_or_none(durations),
+        "avg_files_read": mean_or_none(files_read),
+        "avg_files_changed": mean_or_none(files_changed),
+        "avg_turns": mean_or_none(turns),
+        "avg_commands_run": mean_or_none(commands),
+        "avg_instruction_violations": mean_or_none(violations),
     }
-    for variant, items in sorted(variants.items()):
-        successes = [bool(item.get("success")) for item in items]
-        tests = [bool(item.get("tests_passed")) for item in items if "tests_passed" in item]
-        input_tokens = [
-            float(item.get("tokens_input", item.get("input_tokens", 0)))
-            for item in items
-            if item.get("tokens_input", item.get("input_tokens")) is not None
-        ]
-        output_tokens = [
-            float(item.get("tokens_output", item.get("output_tokens", 0)))
-            for item in items
-            if item.get("tokens_output", item.get("output_tokens")) is not None
-        ]
-        durations = [float(item.get("duration_seconds", 0)) for item in items if item.get("duration_seconds") is not None]
-        files_changed = [
-            float(item.get("files_changed", item.get("files_touched", 0)))
-            for item in items
-            if item.get("files_changed", item.get("files_touched")) is not None
-        ]
-        files_read = [float(item.get("files_read", 0)) for item in items if item.get("files_read") is not None]
-        summary["variants"][variant] = {
-            "runs": len(items),
-            "success_rate": sum(successes) / len(successes) if successes else 0.0,
-            "tests_pass_rate": sum(tests) / len(tests) if tests else None,
-            "avg_tokens_input": statistics.fmean(input_tokens) if input_tokens else None,
-            "avg_tokens_output": statistics.fmean(output_tokens) if output_tokens else None,
-            "avg_duration_seconds": statistics.fmean(durations) if durations else None,
-            "avg_files_read": statistics.fmean(files_read) if files_read else None,
-            "avg_files_changed": statistics.fmean(files_changed) if files_changed else None,
+
+
+def choose_primary_variant(variants: dict[str, dict[str, Any]]) -> str | None:
+    for variant in PRIMARY_VARIANT_ORDER:
+        if variant in variants:
+            return variant
+    if not variants:
+        return None
+    return max(
+        variants,
+        key=lambda item: (
+            variants[item].get("success_rate") or 0.0,
+            variants[item].get("tests_pass_rate") or 0.0,
+            -(variants[item].get("human_intervention_rate") or 0.0),
+        ),
+    )
+
+
+def aggregate_group_variant(items: list[dict[str, Any]]) -> dict[str, float | None]:
+    metrics = variant_metrics(items)
+    return {
+        "success_rate": metrics["success_rate"],
+        "tests_pass_rate": metrics["tests_pass_rate"],
+        "human_intervention_rate": metrics["human_intervention_rate"],
+        "avg_tokens_input": metrics["avg_tokens_input"],
+        "avg_duration_seconds": metrics["avg_duration_seconds"],
+        "avg_turns": metrics["avg_turns"],
+        "avg_files_changed": metrics["avg_files_changed"],
+    }
+
+
+def comparison_score_delta(target: dict[str, float | None], baseline: dict[str, float | None]) -> float:
+    success_delta = (target.get("success_rate") or 0.0) - (baseline.get("success_rate") or 0.0)
+    tests_delta = (target.get("tests_pass_rate") or 0.0) - (baseline.get("tests_pass_rate") or 0.0)
+    intervention_delta = (target.get("human_intervention_rate") or 0.0) - (baseline.get("human_intervention_rate") or 0.0)
+    return success_delta + 0.5 * tests_delta - 0.25 * intervention_delta
+
+
+def build_comparison(rows: list[dict[str, Any]], target_variant: str, baseline_variant: str) -> dict[str, Any]:
+    grouped: dict[str, dict[str, list[dict[str, Any]]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row["paired_group_id"]), {}).setdefault(str(row["variant"]), []).append(row)
+
+    success_deltas: list[float] = []
+    tests_deltas: list[float] = []
+    intervention_deltas: list[float] = []
+    tokens_input_deltas: list[float] = []
+    duration_deltas: list[float] = []
+    turns_deltas: list[float] = []
+    files_changed_deltas: list[float] = []
+    score_deltas: list[float] = []
+
+    for variants in grouped.values():
+        if target_variant not in variants or baseline_variant not in variants:
+            continue
+        target = aggregate_group_variant(variants[target_variant])
+        baseline = aggregate_group_variant(variants[baseline_variant])
+        success_deltas.append((target.get("success_rate") or 0.0) - (baseline.get("success_rate") or 0.0))
+        tests_deltas.append((target.get("tests_pass_rate") or 0.0) - (baseline.get("tests_pass_rate") or 0.0))
+        intervention_deltas.append(
+            (target.get("human_intervention_rate") or 0.0) - (baseline.get("human_intervention_rate") or 0.0)
+        )
+        for key, sink in [
+            ("avg_tokens_input", tokens_input_deltas),
+            ("avg_duration_seconds", duration_deltas),
+            ("avg_turns", turns_deltas),
+            ("avg_files_changed", files_changed_deltas),
+        ]:
+            if target.get(key) is not None and baseline.get(key) is not None:
+                sink.append(float(target[key]) - float(baseline[key]))
+        score_delta = comparison_score_delta(target, baseline)
+        score_deltas.append(score_delta)
+
+    return {
+        "target_variant": target_variant,
+        "baseline_variant": baseline_variant,
+        "paired_groups": len(score_deltas),
+        "score_delta": mean_or_none(score_deltas),
+        "success_rate_delta": mean_or_none(success_deltas),
+        "tests_pass_rate_delta": mean_or_none(tests_deltas),
+        "human_intervention_rate_delta": mean_or_none(intervention_deltas),
+        "avg_tokens_input_delta": mean_or_none(tokens_input_deltas),
+        "avg_duration_seconds_delta": mean_or_none(duration_deltas),
+        "avg_turns_delta": mean_or_none(turns_deltas),
+        "avg_files_changed_delta": mean_or_none(files_changed_deltas),
+        "wins": sum(1 for value in score_deltas if value > 0.05),
+        "losses": sum(1 for value in score_deltas if value < -0.05),
+        "ties": sum(1 for value in score_deltas if -0.05 <= value <= 0.05),
+    }
+
+
+def infer_benchmark_evidence(run_count: int, target_variant: str | None, comparisons: list[dict[str, Any]]) -> dict[str, Any]:
+    if not run_count:
+        return {"status": "not_provided", "reason": "No benchmark runs were provided."}
+    if not target_variant:
+        return {"status": "insufficient", "reason": "No benchmark variant could be selected for comparison."}
+
+    comparable = [item for item in comparisons if item["paired_groups"] > 0 and item["score_delta"] is not None]
+    max_pairs = max((item["paired_groups"] for item in comparable), default=0)
+    if max_pairs < 3:
+        return {
+            "status": "insufficient",
+            "reason": "Fewer than 3 paired task groups are available for the selected comparison.",
+            "target_variant": target_variant,
+            "paired_groups": max_pairs,
         }
-    return summary
+
+    strong_negative = any(
+        (item.get("success_rate_delta") or 0.0) <= -0.15 or (item.get("score_delta") or 0.0) <= -0.25
+        for item in comparable
+    )
+    positive = all((item.get("score_delta") or 0.0) >= 0 for item in comparable) and any(
+        (item.get("success_rate_delta") or 0.0) >= 0.15
+        or ((item.get("success_rate_delta") or 0.0) >= 0 and (item.get("avg_tokens_input_delta") or 0.0) < 0)
+        for item in comparable
+    )
+    negative = strong_negative and not positive
+
+    if positive:
+        status = "supported_positive" if max_pairs >= 6 else "directional_positive"
+        return {
+            "status": status,
+            "reason": f"{target_variant} has positive paired outcomes across available baselines.",
+            "target_variant": target_variant,
+            "paired_groups": max_pairs,
+        }
+    if negative:
+        status = "supported_negative" if max_pairs >= 6 else "directional_negative"
+        return {
+            "status": status,
+            "reason": f"{target_variant} underperformed at least one paired baseline.",
+            "target_variant": target_variant,
+            "paired_groups": max_pairs,
+        }
+    return {
+        "status": "mixed",
+        "reason": "Paired benchmark results do not support a clear positive or negative direction.",
+        "target_variant": target_variant,
+        "paired_groups": max_pairs,
+    }
+
+
+def summarize_runs(path: Path, deterministic: bool = False) -> dict[str, Any]:
+    rows = load_runs(path)
+    variants_raw: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        variants_raw.setdefault(str(row.get("variant", "unknown")), []).append(row)
+    variants = {variant: variant_metrics(items) for variant, items in sorted(variants_raw.items())}
+    target_variant = choose_primary_variant(variants)
+    baseline_variants = [variant for variant in ["none", "current", "native-init"] if variant in variants and variant != target_variant]
+    comparisons = [build_comparison(rows, str(target_variant), baseline) for baseline in baseline_variants] if target_variant else []
+    evidence = infer_benchmark_evidence(len(rows), target_variant, comparisons)
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "benchmark_evidence": evidence,
+        "run_count": len(rows),
+        "paired_group_count": len({str(row["paired_group_id"]) for row in rows}),
+        "target_variant": target_variant,
+        "baseline_variants": baseline_variants,
+        "variants": variants,
+        "comparisons": comparisons,
+    }
 
 
 def render_runs_markdown(summary: dict[str, Any]) -> str:
@@ -791,12 +1064,36 @@ def render_runs_markdown(summary: dict[str, Any]) -> str:
         "# ContextProof Benchmark Summary",
         "",
         f"Runs: {summary['run_count']}",
+        f"Paired groups: {summary['paired_group_count']}",
+        f"Target variant: `{summary.get('target_variant') or 'n/a'}`",
         f"Evidence status: `{evidence['status']}`",
         f"Evidence note: {evidence['reason']}",
         "",
-        "## Variants",
+        "## Comparisons",
         "",
     ]
+    if summary["comparisons"]:
+        for item in summary["comparisons"]:
+            lines.append(f"### {item['target_variant']} vs {item['baseline_variant']}")
+            lines.append("")
+            lines.append(f"- Paired groups: {item['paired_groups']}")
+            if item["success_rate_delta"] is not None:
+                lines.append(f"- Success rate delta: {item['success_rate_delta']:+.2%}")
+            if item["tests_pass_rate_delta"] is not None:
+                lines.append(f"- Tests pass rate delta: {item['tests_pass_rate_delta']:+.2%}")
+            if item["human_intervention_rate_delta"] is not None:
+                lines.append(f"- Human intervention delta: {item['human_intervention_rate_delta']:+.2%}")
+            if item["avg_tokens_input_delta"] is not None:
+                lines.append(f"- Avg input token delta: {item['avg_tokens_input_delta']:+.0f}")
+            if item["avg_duration_seconds_delta"] is not None:
+                lines.append(f"- Avg duration delta seconds: {item['avg_duration_seconds_delta']:+.0f}")
+            lines.append(f"- Wins/losses/ties: {item['wins']}/{item['losses']}/{item['ties']}")
+            lines.append("")
+    else:
+        lines.append("- No paired comparisons available.")
+        lines.append("")
+
+    lines.extend(["## Variants", ""])
     for variant, item in summary["variants"].items():
         lines.append(f"### {variant}")
         lines.append("")
@@ -804,6 +1101,10 @@ def render_runs_markdown(summary: dict[str, Any]) -> str:
         lines.append(f"- Success rate: {item['success_rate']:.2%}")
         if item["tests_pass_rate"] is not None:
             lines.append(f"- Tests pass rate: {item['tests_pass_rate']:.2%}")
+        if item["human_intervention_rate"] is not None:
+            lines.append(f"- Human intervention rate: {item['human_intervention_rate']:.2%}")
+        if item["avg_turns"] is not None:
+            lines.append(f"- Avg turns: {item['avg_turns']:.1f}")
         if item["avg_tokens_input"] is not None:
             lines.append(f"- Avg input tokens: {item['avg_tokens_input']:.0f}")
         if item["avg_tokens_output"] is not None:
@@ -822,7 +1123,8 @@ def command_audit(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
     if not root.exists() or not root.is_dir():
         raise ContextProofInputError(f"Repository path does not exist or is not a directory: {root}")
-    report = audit_repo(root, deterministic=args.deterministic, project_mode=args.project_mode)
+    runs_path = Path(args.runs).resolve() if args.runs else None
+    report = audit_repo(root, deterministic=args.deterministic, project_mode=args.project_mode, runs_path=runs_path)
 
     output_dir = Path(args.output_dir) if args.output_dir else root / ".contextproof"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -834,12 +1136,22 @@ def command_audit(args: argparse.Namespace) -> int:
         target = output_dir / "pr-comment.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_pr_comment(report), encoding="utf-8")
+    if "benchmark_summary" in report:
+        (output_dir / "benchmark-summary.json").write_text(
+            json.dumps(report["benchmark_summary"], indent=2) + "\n",
+            encoding="utf-8",
+        )
+        (output_dir / "benchmark-summary.md").write_text(
+            render_runs_markdown(report["benchmark_summary"]),
+            encoding="utf-8",
+        )
     if args.minimize:
         (output_dir / "context.min.md").write_text(build_minimal_agents_md(report), encoding="utf-8")
         (output_dir / "minimize-rationale.md").write_text(
-            "# ContextProof Minimize Rationale\n\n"
-            "Generated from deterministic repository scan and command discovery. "
-            "Review before replacing any existing agent context.\n",
+            "# ContextProof Starter Scaffold Rationale\n\n"
+            "Generated as a generic starter scaffold from deterministic repository scan "
+            "and command discovery. It is not a project-specific rewrite. Review before "
+            "using it anywhere.\n",
             encoding="utf-8",
         )
     print(json.dumps(report, indent=2))
@@ -891,7 +1203,7 @@ def command_explain(args: argparse.Namespace) -> int:
 
 
 def command_summarize_runs(args: argparse.Namespace) -> int:
-    summary = summarize_runs(Path(args.runs))
+    summary = summarize_runs(Path(args.runs), deterministic=args.deterministic)
     if args.json_out:
         target = Path(args.json_out)
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -916,24 +1228,25 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--pr-comment", action="store_true", help="Write a local PR comment markdown file.")
     audit.add_argument("--minimize", action="store_true", help="Also write a generic starter context candidate.")
     audit.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    audit.add_argument("--runs", help="Optional benchmark JSONL file to merge into the audit report.")
     audit.add_argument(
         "--project-mode",
-        choices=["existing_project_audit", "new_project_bootstrap"],
-        default="existing_project_audit",
-        help="Declare whether this is an existing-project audit or a new-project bootstrap.",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
     )
     audit.add_argument("--fail-under", type=int, help="Exit 1 when score is below this threshold.")
     audit.set_defaults(func=command_audit)
 
-    minimize = subparsers.add_parser("minimize", help="Generate a minimal AGENTS.md candidate.")
+    minimize = subparsers.add_parser("minimize", help="Generate a generic AGENTS.md starter scaffold.")
     minimize.add_argument("repo", help="Repository path.")
     minimize.add_argument("--output", help="Write candidate to this path. Defaults to stdout.")
     minimize.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     minimize.add_argument(
         "--project-mode",
-        choices=["existing_project_audit", "new_project_bootstrap"],
-        default="existing_project_audit",
-        help="Declare whether this is an existing-project audit or a new-project bootstrap.",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
     )
     minimize.set_defaults(func=command_minimize)
 
@@ -942,9 +1255,9 @@ def build_parser() -> argparse.ArgumentParser:
     quickstart.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     quickstart.add_argument(
         "--project-mode",
-        choices=["existing_project_audit", "new_project_bootstrap"],
-        default="existing_project_audit",
-        help="Declare whether this is an existing-project audit or a new-project bootstrap.",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
     )
     quickstart.set_defaults(func=command_quickstart)
 
@@ -957,6 +1270,7 @@ def build_parser() -> argparse.ArgumentParser:
     runs.add_argument("runs", help="Path to benchmark JSONL file.")
     runs.add_argument("--json-out", help="Write JSON summary to this path.")
     runs.add_argument("--md-out", help="Write markdown summary to this path.")
+    runs.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     runs.set_defaults(func=command_summarize_runs)
 
     return parser
