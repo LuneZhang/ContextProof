@@ -33,6 +33,13 @@ Report the static score, confidence state, critical/high findings, evidence, and
 Do not overwrite existing context files.
 ```
 
+After changing `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or other
+agent context files, ask the agent to run:
+
+```text
+Use $context-proof to audit this repository's changed agent context and generate .contextproof/pr-comment.md.
+```
+
 ## Claude Code
 
 Project-local install:
@@ -82,6 +89,18 @@ If the agent cannot run a skill folder directly, install the CLI fallback:
 ```bash
 python -m pip install -e /path/to/ContextProof
 contextproof audit . --pr-comment
+```
+
+For PR-style local review:
+
+```bash
+contextproof audit . --pr-comment --changed-against origin/main...HEAD
+```
+
+To compare against a saved report:
+
+```bash
+contextproof audit . --baseline .contextproof/report.main.json --pr-comment
 ```
 
 ## Project Mode

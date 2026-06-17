@@ -1,0 +1,7 @@
+# Cursor Rules
+
+- Always follow best practices and keep the code production-ready.
+- Always inspect all files before making a change.
+- Always run all tests before submitting.
+- Keep changes small and update docs when behavior changes.
+

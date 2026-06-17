@@ -34,6 +34,16 @@ Status: complete.
 - Better uncertainty reporting.
 - `audit --runs` support for merging behavioral evidence into static reports.
 
+## V0.2.1 PR Workflow Hardening
+
+Status: complete.
+
+- Changed agent-context file detection from local git state or a git ref/range.
+- Baseline report comparison for score and finding deltas.
+- PR comment sections for changed context files and baseline deltas.
+- Realistic team-agent-context demo fixture.
+- GitHub workflow template scoped to agent-context file changes.
+
 ## V0.3 CI And Review UX
 
 - GitHub Action packaging.

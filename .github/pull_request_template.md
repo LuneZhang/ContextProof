@@ -4,6 +4,7 @@
 
 - [ ] `python -m unittest discover -s tests`
 - [ ] `python -m contextproof.cli audit . --pr-comment --deterministic`
+- [ ] If this PR changes agent context, review `.contextproof/pr-comment.md`.
 
 ## Evidence Policy
 

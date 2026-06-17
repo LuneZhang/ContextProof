@@ -52,7 +52,11 @@ audit targets unless they are actually injected into agent context.
 4. Report the static score, confidence state, critical/high findings, evidence,
    and generated file paths.
 
-5. If the user explicitly asks for a starter scaffold, rerun audit with
+5. When reviewing a branch or PR, use `--changed-against` if the user provides
+   a base ref/range. Use `--baseline` if the user provides a previous
+   `.contextproof/report.json`.
+
+6. If the user explicitly asks for a starter scaffold, rerun audit with
    `--minimize`. Treat `context.min.md` as a generic starter only. Do not
    overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or other
    context files unless the user explicitly asks.

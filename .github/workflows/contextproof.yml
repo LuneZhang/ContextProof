@@ -2,21 +2,51 @@ name: contextproof
 
 on:
   pull_request:
+    paths:
+      - "AGENTS.md"
+      - "**/AGENTS.md"
+      - "CLAUDE.md"
+      - "**/CLAUDE.md"
+      - "GEMINI.md"
+      - "**/GEMINI.md"
+      - "SKILL.md"
+      - "**/SKILL.md"
+      - ".cursor/rules/**"
+      - ".github/copilot-instructions.md"
   push:
     branches: [main]
+    paths:
+      - "AGENTS.md"
+      - "**/AGENTS.md"
+      - "CLAUDE.md"
+      - "**/CLAUDE.md"
+      - "GEMINI.md"
+      - "**/GEMINI.md"
+      - "SKILL.md"
+      - "**/SKILL.md"
+      - ".cursor/rules/**"
+      - ".github/copilot-instructions.md"
 
 jobs:
   audit:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
       - name: Audit agent context
         run: |
-          python -m contextproof.cli audit . \
-            --pr-comment
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            python -m contextproof.cli audit . \
+              --pr-comment \
+              --changed-against "origin/${{ github.base_ref }}...HEAD"
+          else
+            python -m contextproof.cli audit . \
+              --pr-comment
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

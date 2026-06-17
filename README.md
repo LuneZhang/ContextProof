@@ -56,6 +56,12 @@ python -m contextproof.cli audit examples/bad-agent-context --pr-comment
 The demo flags vague rules, over-broad exploration, risky shell text,
 contradictory instructions, and missing validation commands.
 
+For a more realistic accumulated team-context example:
+
+```bash
+python -m contextproof.cli audit examples/team-agent-context --pr-comment
+```
+
 ## After Editing Agent Context
 
 Run ContextProof after changing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
@@ -67,6 +73,12 @@ contextproof audit . --pr-comment
 
 If the change is part of a PR, use `.contextproof/pr-comment.md` as the local
 review summary for the context change.
+
+To compare the current branch against a base ref in a PR-style workflow:
+
+```bash
+contextproof audit . --pr-comment --changed-against origin/main...HEAD
+```
 
 ## What It Audits
 
@@ -296,7 +308,18 @@ contextproof audit . --fail-under 70 --pr-comment
 ```
 
 The included GitHub workflow writes artifacts by default; it does not fail PRs
-on static score unless `--fail-under` is added.
+on static score unless `--fail-under` is added. The workflow is scoped to
+agent-context file changes.
+
+### Baseline Reports
+
+Compare the current audit against a previously saved report:
+
+```bash
+contextproof audit . --baseline .contextproof/report.main.json --pr-comment
+```
+
+The PR comment will include score delta, new findings, and resolved findings.
 
 ## Repository Layout
 

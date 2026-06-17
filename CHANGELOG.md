@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Added changed agent-context file detection from local git state or a git ref/range.
+- Added baseline report comparison for score and finding deltas.
+- Improved PR comment output for changed context files and baseline deltas.
+- Added a more realistic team-agent-context demo fixture.
+- Updated the GitHub workflow template to run on agent-context file changes.
+
 ## 0.2.0
 
 - Added paired benchmark grouping and comparison summaries.

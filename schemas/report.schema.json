@@ -12,6 +12,7 @@
     "static_context_score",
     "benchmark_evidence",
     "summary",
+    "change_detection",
     "context_files",
     "commands",
     "findings",
@@ -86,6 +87,36 @@
       "additionalProperties": true
     },
     "benchmark_summary": { "type": "object" },
+    "baseline_delta": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "baseline_report": { "type": "string" },
+        "score_delta": { "type": "integer" },
+        "baseline_score": { "type": "integer" },
+        "current_score": { "type": "integer" },
+        "new_finding_count": { "type": "integer", "minimum": 0 },
+        "resolved_finding_count": { "type": "integer", "minimum": 0 },
+        "unchanged_finding_count": { "type": "integer", "minimum": 0 },
+        "new_findings": { "type": "array" },
+        "resolved_findings": { "type": "array" }
+      },
+      "additionalProperties": true
+    },
+    "change_detection": {
+      "type": "object",
+      "required": ["status", "changed_context_files"],
+      "properties": {
+        "status": { "type": "string" },
+        "reason": { "type": "string" },
+        "source": { "type": "string" },
+        "base_ref": { "type": ["string", "null"] },
+        "changed_files": { "type": "array", "items": { "type": "string" } },
+        "changed_context_files": { "type": "array", "items": { "type": "string" } },
+        "changed_context_file_count": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": true
+    },
     "summary": { "type": "object" },
     "context_files": { "type": "array" },
     "commands": { "type": "array" },

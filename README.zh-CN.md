@@ -53,6 +53,12 @@ python -m contextproof.cli audit examples/bad-agent-context --pr-comment
 
 demo 会标出模糊规则、过度宽泛探索、危险 shell 文本、矛盾指令和缺失验证命令。
 
+更接近真实团队规则债的示例：
+
+```bash
+python -m contextproof.cli audit examples/team-agent-context --pr-comment
+```
+
 ## 修改 Agent Context 后
 
 修改 `AGENTS.md`、`CLAUDE.md`、`GEMINI.md`、`.cursor/rules`、`SKILL.md`、MCP notes
@@ -63,6 +69,12 @@ contextproof audit . --pr-comment
 ```
 
 如果这些文件变更属于 PR，可以把 `.contextproof/pr-comment.md` 作为本地 PR review 摘要。
+
+如果要在 PR 工作流中对比当前分支和 base ref：
+
+```bash
+contextproof audit . --pr-comment --changed-against origin/main...HEAD
+```
 
 ## 它审计什么
 
@@ -284,6 +296,17 @@ contextproof audit . --fail-under 70 --pr-comment
 ```
 
 默认 GitHub workflow 只上传 artifact，不因为静态分数失败而阻断 PR，除非显式添加 `--fail-under`。
+该 workflow 默认只在 agent-context 文件变更时运行。
+
+### Baseline 报告
+
+把当前审计结果和之前保存的 report 对比：
+
+```bash
+contextproof audit . --baseline .contextproof/report.main.json --pr-comment
+```
+
+PR comment 会包含分数变化、新增 findings 和已解决 findings。
 
 ## 仓库结构
 

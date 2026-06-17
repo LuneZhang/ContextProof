@@ -47,7 +47,7 @@ class ContextProofTests(unittest.TestCase):
             result = run_cli("audit", str(root), "--deterministic")
             payload = json.loads(result.stdout)
             issue_ids = {issue["id"] for issue in payload["findings"]}
-            self.assertEqual(payload["schema_version"], "0.2.0")
+            self.assertEqual(payload["schema_version"], "0.2.1")
             self.assertEqual(payload["project_mode"], "existing_project")
             self.assertEqual(payload["confidence_state"], "static_only")
             self.assertEqual(payload["benchmark_evidence"]["status"], "not_provided")
@@ -76,7 +76,7 @@ class ContextProofTests(unittest.TestCase):
             ]:
                 self.assertTrue((output_dir / name).exists(), name)
             written = json.loads((output_dir / "report.json").read_text(encoding="utf-8"))
-            self.assertEqual(written["schema_version"], "0.2.0")
+            self.assertEqual(written["schema_version"], "0.2.1")
             self.assertIn("ContextProof", (output_dir / "pr-comment.md").read_text(encoding="utf-8"))
 
     def test_bad_agent_context_demo_has_expected_findings(self):
@@ -92,6 +92,18 @@ class ContextProofTests(unittest.TestCase):
             self.assertIn("conflicting-rule", issue_ids)
             self.assertIn("Findings", (output_dir / "report.md").read_text(encoding="utf-8"))
 
+    def test_team_agent_context_demo_has_realistic_findings(self):
+        fixture = REPO_ROOT / "examples" / "team-agent-context"
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "contextproof"
+            result = run_cli("audit", str(fixture), "--output-dir", str(output_dir), "--pr-comment")
+            payload = json.loads(result.stdout)
+            issue_ids = {issue["id"] for issue in payload["findings"]}
+            self.assertIn("vague-rule", issue_ids)
+            self.assertIn("overbroad-context", issue_ids)
+            self.assertIn("duplicate-rule", issue_ids)
+            self.assertIn("missing-test-command", issue_ids)
+
     def test_repo_self_audit_ignores_demo_context(self):
         result = run_cli("audit", str(REPO_ROOT), "--deterministic")
         payload = json.loads(result.stdout)
@@ -106,6 +118,38 @@ class ContextProofTests(unittest.TestCase):
             payload = json.loads(result.stdout)
             self.assertEqual(payload["root"], str(root.resolve()))
             self.assertTrue((root / ".contextproof" / "report.json").exists())
+
+    def test_audit_reports_changed_context_files_from_git_worktree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True)
+            (root / "AGENTS.md").write_text("Run `pytest` before submitting code.\n", encoding="utf-8")
+            (root / ".cursor" / "rules").mkdir(parents=True)
+            (root / ".cursor" / "rules" / "repo.mdc").write_text("Follow best practices.\n", encoding="utf-8")
+            result = run_cli("audit", str(root), "--pr-comment", "--deterministic")
+            payload = json.loads(result.stdout)
+            changed = set(payload["change_detection"]["changed_context_files"])
+            self.assertIn("AGENTS.md", changed)
+            self.assertIn(".cursor/rules/repo.mdc", changed)
+            self.assertIn("Changed agent context", (root / ".contextproof" / "pr-comment.md").read_text(encoding="utf-8"))
+
+    def test_audit_reports_baseline_delta(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "repo"
+            root.mkdir()
+            baseline = Path(tmp) / "baseline.json"
+            (root / "AGENTS.md").write_text(
+                "Always follow best practices.\nRead the entire repository before every task.\n",
+                encoding="utf-8",
+            )
+            run_cli("audit", str(root), "--json-out", str(baseline), "--deterministic")
+            (root / "AGENTS.md").write_text("Run `pytest` before submitting code.\n", encoding="utf-8")
+            result = run_cli("audit", str(root), "--baseline", str(baseline), "--pr-comment", "--deterministic")
+            payload = json.loads(result.stdout)
+            self.assertGreater(payload["baseline_delta"]["score_delta"], 0)
+            self.assertGreater(payload["baseline_delta"]["resolved_finding_count"], 0)
+            comment = (root / ".contextproof" / "pr-comment.md").read_text(encoding="utf-8")
+            self.assertIn("Baseline delta", comment)
 
     def test_bad_repo_returns_input_error_exit_code_two(self):
         missing = REPO_ROOT / "does-not-exist-for-contextproof"
@@ -173,7 +217,7 @@ class ContextProofTests(unittest.TestCase):
                 lines.append(
                     json.dumps(
                         {
-                            "schema_version": "0.2.0",
+                            "schema_version": "0.2.1",
                             "run_id": f"current-{index}",
                             "paired_group_id": group,
                             "task_id": group,
@@ -194,7 +238,7 @@ class ContextProofTests(unittest.TestCase):
                 lines.append(
                     json.dumps(
                         {
-                            "schema_version": "0.2.0",
+                            "schema_version": "0.2.1",
                             "run_id": f"reviewed-{index}",
                             "paired_group_id": group,
                             "task_id": group,

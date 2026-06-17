@@ -29,4 +29,7 @@ python -m pip install -e .
 
 If the contextproof command is unavailable, run:
 python -m contextproof.cli audit . --pr-comment
+
+When reviewing a PR that changes agent context files, preserve the generated
+.contextproof/pr-comment.md as the local review summary.
 ```

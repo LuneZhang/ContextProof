@@ -9,6 +9,7 @@ import math
 import os
 import re
 import statistics
+import subprocess
 import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "0.2.0"
+SCHEMA_VERSION = "0.2.1"
 
 IGNORE_DIRS = {
     ".git",
@@ -343,6 +344,81 @@ def is_context_file(path: Path, root: Path) -> bool:
     return False
 
 
+def is_context_path(path: str) -> bool:
+    normalized = path.replace("\\", "/").strip("/")
+    if not normalized:
+        return False
+    parts = normalized.split("/")
+    name = parts[-1]
+    if name in CONTEXT_BASENAMES:
+        return True
+    if ".cursor" in parts and "rules" in parts and Path(name).suffix in {".md", ".mdc", ".txt"}:
+        return True
+    if normalized == ".github/copilot-instructions.md" or normalized.endswith("/.github/copilot-instructions.md"):
+        return True
+    return False
+
+
+def git_output(root: Path, args: list[str]) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(root), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return completed.stdout
+
+
+def detect_changed_context_files(root: Path, changed_against: str | None = None) -> dict[str, Any]:
+    try:
+        git_output(root, ["rev-parse", "--show-toplevel"])
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return {
+            "status": "not_available",
+            "reason": "No readable git repository was found.",
+            "base_ref": changed_against,
+            "changed_files": [],
+            "changed_context_files": [],
+        }
+
+    try:
+        changed: set[str] = set()
+        if changed_against:
+            changed.update(
+                line.strip()
+                for line in git_output(root, ["diff", "--name-only", "--relative", changed_against, "--", "."]).splitlines()
+                if line.strip()
+            )
+            source = "git_diff_ref"
+        else:
+            for args in (
+                ["diff", "--name-only", "--relative", "--", "."],
+                ["diff", "--name-only", "--relative", "--cached", "--", "."],
+                ["ls-files", "--others", "--exclude-standard", "--", "."],
+            ):
+                changed.update(line.strip() for line in git_output(root, args).splitlines() if line.strip())
+            source = "git_worktree"
+    except subprocess.CalledProcessError as exc:
+        return {
+            "status": "error",
+            "reason": (exc.stderr or str(exc)).strip(),
+            "base_ref": changed_against,
+            "changed_files": [],
+            "changed_context_files": [],
+        }
+
+    changed_files = sorted(changed)
+    changed_context_files = [item for item in changed_files if is_context_path(item)]
+    return {
+        "status": "available",
+        "source": source,
+        "base_ref": changed_against,
+        "changed_files": changed_files,
+        "changed_context_files": changed_context_files,
+        "changed_context_file_count": len(changed_context_files),
+    }
+
+
 def classify_context(path: Path, root: Path) -> str:
     relative = path.relative_to(root).as_posix()
     if relative == "AGENTS.md":
@@ -632,11 +708,64 @@ def build_recommendations(context_files: list[ContextFile], commands: list[Comma
     return recommendations
 
 
+def finding_key(finding: dict[str, Any]) -> str:
+    return "|".join(
+        [
+            str(finding.get("id", "")),
+            str(finding.get("path", "")),
+            str(finding.get("evidence", ""))[:160],
+        ]
+    )
+
+
+def compact_finding(finding: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": finding.get("id"),
+        "severity": finding.get("severity"),
+        "path": finding.get("path"),
+        "recommendation": finding.get("recommendation"),
+    }
+
+
+def build_baseline_delta(report: dict[str, Any], baseline_path: Path | None) -> dict[str, Any] | None:
+    if baseline_path is None:
+        return None
+    if not baseline_path.exists() or not baseline_path.is_file():
+        raise ContextProofInputError(f"Baseline report file does not exist: {baseline_path}")
+    try:
+        baseline = json.loads(baseline_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ContextProofInputError(f"Baseline report is not valid JSON: {exc}") from exc
+
+    current_findings = report.get("findings", [])
+    baseline_findings = baseline.get("findings", [])
+    current_by_key = {finding_key(item): item for item in current_findings}
+    baseline_by_key = {finding_key(item): item for item in baseline_findings}
+    new_keys = sorted(set(current_by_key) - set(baseline_by_key))
+    resolved_keys = sorted(set(baseline_by_key) - set(current_by_key))
+    current_score = int(report.get("static_context_score", {}).get("total", 0))
+    baseline_score = int(baseline.get("static_context_score", {}).get("total", 0))
+    return {
+        "status": "compared",
+        "baseline_report": str(baseline_path),
+        "score_delta": current_score - baseline_score,
+        "baseline_score": baseline_score,
+        "current_score": current_score,
+        "new_finding_count": len(new_keys),
+        "resolved_finding_count": len(resolved_keys),
+        "unchanged_finding_count": len(set(current_by_key) & set(baseline_by_key)),
+        "new_findings": [compact_finding(current_by_key[key]) for key in new_keys[:20]],
+        "resolved_findings": [compact_finding(baseline_by_key[key]) for key in resolved_keys[:20]],
+    }
+
+
 def audit_repo(
     root: Path,
     deterministic: bool = False,
     project_mode: str = "existing_project",
     runs_path: Path | None = None,
+    changed_against: str | None = None,
+    baseline_path: Path | None = None,
 ) -> dict[str, Any]:
     normalized_project_mode = normalize_project_mode(project_mode)
     context_files, issues, duplicates = analyze_context(root)
@@ -672,6 +801,7 @@ def audit_repo(
             "duplicate_rule_count": len(duplicates),
             "benchmark_run_count": benchmark_summary["run_count"] if benchmark_summary else 0,
         },
+        "change_detection": detect_changed_context_files(root, changed_against),
         "context_files": [asdict(item) for item in context_files],
         "commands": [asdict(item) for item in commands],
         "findings": [finding_from_issue(item) for item in issues],
@@ -679,6 +809,9 @@ def audit_repo(
     }
     if benchmark_summary:
         report["benchmark_summary"] = benchmark_summary
+    baseline_delta = build_baseline_delta(report, baseline_path)
+    if baseline_delta:
+        report["baseline_delta"] = baseline_delta
     return report
 
 
@@ -711,6 +844,23 @@ def render_markdown_report(report: dict[str, Any]) -> str:
         lines.append(f"- Target variant: `{evidence['target_variant']}`")
     if "paired_groups" in evidence:
         lines.append(f"- Paired groups: {evidence['paired_groups']}")
+    change_detection = report.get("change_detection", {})
+    lines.extend(["", "## Changed Agent Context", ""])
+    if change_detection.get("status") == "available":
+        changed_context_files = change_detection.get("changed_context_files", [])
+        if changed_context_files:
+            for item in changed_context_files:
+                lines.append(f"- `{item}`")
+        else:
+            lines.append("- No changed agent-context files detected.")
+    else:
+        lines.append(f"- Change detection unavailable: {change_detection.get('reason', 'unknown')}")
+    if "baseline_delta" in report:
+        delta = report["baseline_delta"]
+        lines.extend(["", "## Baseline Delta", ""])
+        lines.append(f"- Score delta: {delta['score_delta']:+d}")
+        lines.append(f"- New findings: {delta['new_finding_count']}")
+        lines.append(f"- Resolved findings: {delta['resolved_finding_count']}")
     lines.extend(["", "## Findings", ""])
     if report["findings"]:
         for issue in report["findings"]:
@@ -746,6 +896,32 @@ def render_pr_comment(report: dict[str, Any]) -> str:
         f"- Findings: {len(findings)} total, {len(high_findings)} critical/high",
         "",
     ]
+    change_detection = report.get("change_detection", {})
+    if change_detection.get("status") == "available":
+        changed_context_files = change_detection.get("changed_context_files", [])
+        lines.append("### Changed agent context")
+        lines.append("")
+        if changed_context_files:
+            for item in changed_context_files[:10]:
+                lines.append(f"- `{item}`")
+            if len(changed_context_files) > 10:
+                lines.append(f"- ...and {len(changed_context_files) - 10} more")
+        else:
+            lines.append("- No changed agent-context files detected.")
+        lines.append("")
+    if "baseline_delta" in report:
+        delta = report["baseline_delta"]
+        lines.append("### Baseline delta")
+        lines.append("")
+        lines.append(f"- Score delta: **{delta['score_delta']:+d}**")
+        lines.append(f"- New findings: {delta['new_finding_count']}")
+        lines.append(f"- Resolved findings: {delta['resolved_finding_count']}")
+        if delta["new_findings"]:
+            lines.append("")
+            lines.append("New findings:")
+            for item in delta["new_findings"][:5]:
+                lines.append(f"- **{item['severity']}** `{item['id']}` in `{item['path']}`")
+        lines.append("")
     if high_findings:
         lines.append("### Highest priority findings")
         lines.append("")
@@ -1124,7 +1300,15 @@ def command_audit(args: argparse.Namespace) -> int:
     if not root.exists() or not root.is_dir():
         raise ContextProofInputError(f"Repository path does not exist or is not a directory: {root}")
     runs_path = Path(args.runs).resolve() if args.runs else None
-    report = audit_repo(root, deterministic=args.deterministic, project_mode=args.project_mode, runs_path=runs_path)
+    baseline_path = Path(args.baseline).resolve() if args.baseline else None
+    report = audit_repo(
+        root,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+        runs_path=runs_path,
+        changed_against=args.changed_against,
+        baseline_path=baseline_path,
+    )
 
     output_dir = Path(args.output_dir) if args.output_dir else root / ".contextproof"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1229,6 +1413,8 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument("--minimize", action="store_true", help="Also write a generic starter context candidate.")
     audit.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     audit.add_argument("--runs", help="Optional benchmark JSONL file to merge into the audit report.")
+    audit.add_argument("--changed-against", help="Git ref/range used to detect changed agent-context files.")
+    audit.add_argument("--baseline", help="Previous ContextProof report.json to compare against.")
     audit.add_argument(
         "--project-mode",
         choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
