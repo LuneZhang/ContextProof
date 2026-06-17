@@ -31,6 +31,12 @@ def run_cli(
 
 
 class ContextProofTests(unittest.TestCase):
+    def assert_project_skill_install(self, workspace: Path):
+        installed = workspace / ".agents" / "skills" / "context-proof"
+        self.assertTrue((installed / "SKILL.md").exists())
+        self.assertTrue((installed / "scripts" / "contextproof.py").exists())
+        self.assertTrue((installed / "references" / "context-antipatterns.md").exists())
+
     def test_audit_flags_risky_and_vague_context(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -183,6 +189,48 @@ class ContextProofTests(unittest.TestCase):
             )
             payload = json.loads(result.stdout)
             self.assertIn("static_context_score", payload)
+
+    @unittest.skipIf(os.name == "nt", "POSIX install script smoke test runs on POSIX")
+    def test_posix_install_script_installs_project_agents_skill(self):
+        shell = shutil.which("sh")
+        if not shell:
+            self.skipTest("sh is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            result = subprocess.run(
+                [shell, str(REPO_ROOT / "scripts" / "install-contextproof-skill.sh"), "project-agents"],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("Installed context-proof skill", result.stdout)
+            self.assert_project_skill_install(workspace)
+
+    def test_powershell_install_script_installs_project_agents_skill(self):
+        shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not shell:
+            self.skipTest("PowerShell is not available")
+        with tempfile.TemporaryDirectory() as tmp:
+            workspace = Path(tmp)
+            command = [
+                shell,
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                str(REPO_ROOT / "scripts" / "install-contextproof-skill.ps1"),
+                "project-agents",
+            ]
+            result = subprocess.run(
+                command,
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            self.assertIn("Installed context-proof skill", result.stdout)
+            self.assert_project_skill_install(workspace)
 
     def test_summarize_runs_uses_canonical_fields_and_accepts_ingest_aliases(self):
         with tempfile.TemporaryDirectory() as tmp:

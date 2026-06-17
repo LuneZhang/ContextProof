@@ -121,6 +121,28 @@ git clone https://github.com/LuneZhang/ContextProof.git
 cd ContextProof
 ```
 
+快捷安装脚本：
+
+```bash
+./scripts/install-contextproof-skill.sh codex
+./scripts/install-contextproof-skill.sh claude
+./scripts/install-contextproof-skill.sh opencode
+./scripts/install-contextproof-skill.sh project-agents
+```
+
+Windows PowerShell：
+
+```powershell
+.\scripts\install-contextproof-skill.ps1 codex
+.\scripts\install-contextproof-skill.ps1 claude
+.\scripts\install-contextproof-skill.ps1 opencode
+.\scripts\install-contextproof-skill.ps1 project-agents
+```
+
+支持的安装范围：`agents`、`codex`、`claude`、`opencode`、`project-agents`、
+`project-claude` 和 `project-opencode`。这些脚本只复制 `skill/context-proof`
+文件夹，不会修改你的 agent context 文件。
+
 ### Codex
 
 macOS、Linux、WSL：
@@ -299,6 +321,12 @@ contextproof audit . --fail-under 70 --pr-comment
 该 workflow 默认只在 agent-context 文件变更时运行。
 
 ### Baseline 报告
+
+先在你信任的分支上创建或刷新 baseline report，通常是 `main`：
+
+```bash
+contextproof audit . --json-out .contextproof/report.main.json
+```
 
 把当前审计结果和之前保存的 report 对比：
 

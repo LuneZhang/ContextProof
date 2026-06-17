@@ -128,6 +128,29 @@ git clone https://github.com/LuneZhang/ContextProof.git
 cd ContextProof
 ```
 
+Shortcut installer:
+
+```bash
+./scripts/install-contextproof-skill.sh codex
+./scripts/install-contextproof-skill.sh claude
+./scripts/install-contextproof-skill.sh opencode
+./scripts/install-contextproof-skill.sh project-agents
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\install-contextproof-skill.ps1 codex
+.\scripts\install-contextproof-skill.ps1 claude
+.\scripts\install-contextproof-skill.ps1 opencode
+.\scripts\install-contextproof-skill.ps1 project-agents
+```
+
+Supported installer scopes: `agents`, `codex`, `claude`, `opencode`,
+`project-agents`, `project-claude`, and `project-opencode`. The installers
+only copy the `skill/context-proof` folder; they do not modify your agent
+context files.
+
 ### Codex
 
 macOS, Linux, WSL:
@@ -312,6 +335,12 @@ on static score unless `--fail-under` is added. The workflow is scoped to
 agent-context file changes.
 
 ### Baseline Reports
+
+Create or refresh a baseline report from the branch you trust, usually `main`:
+
+```bash
+contextproof audit . --json-out .contextproof/report.main.json
+```
 
 Compare the current audit against a previously saved report:
 
