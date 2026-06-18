@@ -1,0 +1,12 @@
+{
+  "scenario_id": "new-project-init-brief",
+  "project_mode": "new_project",
+  "expected_issue_ids": [
+    "vague-rule",
+    "overbroad-context"
+  ],
+  "preserve": [
+    "npm test",
+    "TypeScript service"
+  ]
+}

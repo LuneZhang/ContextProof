@@ -11,13 +11,14 @@ import re
 import statistics
 import subprocess
 import sys
+import tempfile
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "0.2.1"
+SCHEMA_VERSION = "0.3.0"
 
 IGNORE_DIRS = {
     ".git",
@@ -82,7 +83,22 @@ RISKY_PATTERNS = [
     r"\bdo not (mention|disclose|reveal)\b.*\b(instruction|rule|policy)\b",
 ]
 
+GENERAL_DOC_PATTERNS = [
+    r"^#+\s*(roadmap|product overview|meeting notes|release notes|changelog|marketing copy)\b",
+    r"\bq[1-4]\s+roadmap\b",
+    r"\bgo[- ]to[- ]market\b",
+    r"\buser personas?\b",
+]
+
 COMMAND_RE = re.compile(r"`([^`\n]*(?:npm|pnpm|yarn|bun|pytest|ruff|mypy|cargo|go test|make|just)[^`\n]*)`")
+PATH_MARKER_RE = re.compile(
+    r"(?<![\w/.-])"
+    r"("
+    r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+(?:\.[A-Za-z0-9]+)?"
+    r"|"
+    r"[A-Za-z0-9_.-]+\.(?:py|js|jsx|ts|tsx|json|toml|yaml|yml|md|mdc|rs|go|java|rb|php|cs|sh|ps1|sql)"
+    r")"
+)
 
 SEVERITY_PENALTY = {
     "critical": 12.0,
@@ -168,7 +184,7 @@ class Issue:
 def issue_category(issue_id: str) -> str:
     if issue_id in {"missing-agent-context"}:
         return "discoverability"
-    if issue_id in {"large-context-file", "vague-rule", "duplicate-rule", "overconstrained-rules"}:
+    if issue_id in {"large-context-file", "vague-rule", "duplicate-rule", "overconstrained-rules", "misplaced-general-docs"}:
         return "minimality"
     if issue_id in {"large-context-set"}:
         return "minimality"
@@ -626,6 +642,16 @@ def analyze_context(root: Path) -> tuple[list[ContextFile], list[Issue], dict[st
             "Context contains risky operational or prompt-injection language.",
             "Remove unsafe shell patterns and instructions that hide or override policy.",
         )
+        add_pattern_issues(
+            issues,
+            text,
+            relative,
+            GENERAL_DOC_PATTERNS,
+            "misplaced-general-docs",
+            "low",
+            "Context appears to include general project documentation rather than agent operating instructions.",
+            "Move general narrative, roadmap, or product notes into ordinary docs and keep agent context operational.",
+        )
 
         for line in normalized_instruction_lines(text):
             duplicate_counter[line] = duplicate_counter.get(line, 0) + 1
@@ -999,6 +1025,410 @@ def write_outputs(payload: dict[str, Any], json_out: str | None, md_out: str | N
         target = Path(md_out)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(render_markdown_report(payload), encoding="utf-8")
+
+
+def canonical_context_filename(path: Path) -> str:
+    if path.name in CONTEXT_BASENAMES:
+        return path.name
+    if path.suffix in {".md", ".mdc", ".txt"}:
+        return "AGENTS.md"
+    return "AGENTS.md"
+
+
+def context_input_text(path: Path) -> str:
+    if path.is_file():
+        return read_text(path)
+    if path.is_dir():
+        chunks: list[str] = []
+        for context_path, _kind in discover_context_files(path):
+            relative = rel(context_path, path)
+            chunks.append(f"\n\n<!-- {relative} -->\n\n{read_text(context_path)}")
+        return "\n".join(chunks).strip()
+    raise ContextProofInputError(f"Context input does not exist: {path}")
+
+
+def audit_context_input(path: Path, deterministic: bool, project_mode: str) -> dict[str, Any]:
+    if path.is_dir():
+        return audit_repo(path.resolve(), deterministic=deterministic, project_mode=project_mode)
+    if not path.is_file():
+        raise ContextProofInputError(f"Context input does not exist or is not a file/directory: {path}")
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        target = root / canonical_context_filename(path)
+        target.write_text(read_text(path), encoding="utf-8")
+        return audit_repo(root, deterministic=deterministic, project_mode=project_mode)
+
+
+def severity_count(report: dict[str, Any], severities: set[str]) -> int:
+    return sum(1 for item in report.get("findings", []) if item.get("severity") in severities)
+
+
+def finding_map(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    return {finding_key(item): item for item in report.get("findings", [])}
+
+
+def extract_validation_commands(text: str) -> set[str]:
+    return {item.strip() for item in COMMAND_RE.findall(text) if item.strip()}
+
+
+def extract_path_markers(text: str) -> set[str]:
+    markers: set[str] = set()
+    for match in PATH_MARKER_RE.findall(text):
+        value = match.strip("`'\".,:;()[]{}")
+        if not value or value.startswith(("http://", "https://")):
+            continue
+        if len(value) > 160:
+            continue
+        markers.add(value.replace("\\", "/"))
+    return markers
+
+
+def compact_report_summary(report: dict[str, Any]) -> dict[str, Any]:
+    score = report.get("static_context_score", {})
+    summary = report.get("summary", {})
+    findings = report.get("findings", [])
+    return {
+        "score": score.get("total"),
+        "dimensions": score.get("dimensions", {}),
+        "total_context_tokens": summary.get("total_context_tokens", 0),
+        "context_file_count": summary.get("context_file_count", 0),
+        "issue_count": len(findings),
+        "critical_high_finding_count": severity_count(report, {"critical", "high"}),
+        "findings": [compact_finding(item) for item in findings[:30]],
+    }
+
+
+def compare_contexts(
+    source_path: Path,
+    candidate_path: Path,
+    deterministic: bool = False,
+    project_mode: str = "existing_project",
+) -> dict[str, Any]:
+    source_path = source_path.resolve()
+    candidate_path = candidate_path.resolve()
+    source_text = context_input_text(source_path)
+    candidate_text = context_input_text(candidate_path)
+    source_report = audit_context_input(source_path, deterministic=deterministic, project_mode=project_mode)
+    candidate_report = audit_context_input(candidate_path, deterministic=deterministic, project_mode=project_mode)
+
+    source_findings = finding_map(source_report)
+    candidate_findings = finding_map(candidate_report)
+    resolved_keys = sorted(set(source_findings) - set(candidate_findings))
+    introduced_keys = sorted(set(candidate_findings) - set(source_findings))
+
+    source_commands = extract_validation_commands(source_text)
+    candidate_commands = extract_validation_commands(candidate_text)
+    source_paths = extract_path_markers(source_text)
+    candidate_paths = extract_path_markers(candidate_text)
+    removed_commands = sorted(source_commands - candidate_commands)
+    removed_paths = sorted(source_paths - candidate_paths)
+
+    source_score = int(source_report["static_context_score"]["total"])
+    candidate_score = int(candidate_report["static_context_score"]["total"])
+    source_tokens = int(source_report["summary"]["total_context_tokens"])
+    candidate_tokens = int(candidate_report["summary"]["total_context_tokens"])
+    source_critical_high = severity_count(source_report, {"critical", "high"})
+    candidate_critical_high = severity_count(candidate_report, {"critical", "high"})
+    introduced_high = [
+        candidate_findings[key]
+        for key in introduced_keys
+        if candidate_findings[key].get("severity") in {"critical", "high"}
+    ]
+
+    regression_flags: list[str] = []
+    if introduced_high:
+        regression_flags.append("introduced-critical-or-high-finding")
+    if source_commands and not candidate_commands:
+        regression_flags.append("dropped-all-validation-commands")
+    elif removed_commands:
+        regression_flags.append("removed-some-validation-commands")
+    if source_paths and len(removed_paths) == len(source_paths):
+        regression_flags.append("dropped-all-path-markers")
+    elif source_paths and len(removed_paths) / max(1, len(source_paths)) > 0.5:
+        regression_flags.append("dropped-most-path-markers")
+    source_safety = int(source_report["static_context_score"]["dimensions"].get("safety", 0))
+    candidate_safety = int(candidate_report["static_context_score"]["dimensions"].get("safety", 0))
+    if candidate_safety < source_safety:
+        regression_flags.append("safety-score-decreased")
+
+    score_delta = candidate_score - source_score
+    token_delta = candidate_tokens - source_tokens
+    critical_high_delta = candidate_critical_high - source_critical_high
+    if regression_flags:
+        verdict = "regression"
+    elif score_delta > 0 and critical_high_delta <= 0:
+        verdict = "improved"
+    elif score_delta == 0 and token_delta == 0 and critical_high_delta == 0:
+        verdict = "unchanged"
+    else:
+        verdict = "mixed"
+
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "comparison_type": "context_candidate",
+        "project_mode": normalize_project_mode(project_mode),
+        "source_path": str(source_path),
+        "candidate_path": str(candidate_path),
+        "verdict": verdict,
+        "regression_flags": regression_flags,
+        "deltas": {
+            "score_delta": score_delta,
+            "token_delta": token_delta,
+            "critical_high_finding_delta": critical_high_delta,
+            "resolved_finding_count": len(resolved_keys),
+            "introduced_finding_count": len(introduced_keys),
+        },
+        "source": compact_report_summary(source_report),
+        "candidate": compact_report_summary(candidate_report),
+        "preservation": {
+            "source_validation_commands": sorted(source_commands),
+            "candidate_validation_commands": sorted(candidate_commands),
+            "removed_validation_commands": removed_commands,
+            "source_path_marker_count": len(source_paths),
+            "candidate_path_marker_count": len(candidate_paths),
+            "removed_path_markers": removed_paths[:30],
+        },
+        "resolved_findings": [compact_finding(source_findings[key]) for key in resolved_keys[:30]],
+        "introduced_findings": [compact_finding(candidate_findings[key]) for key in introduced_keys[:30]],
+        "recommendation": candidate_recommendation(verdict, regression_flags),
+    }
+
+
+def candidate_recommendation(verdict: str, regression_flags: list[str]) -> str:
+    if verdict == "improved":
+        return "Candidate improved static context hygiene without detected preservation regressions. Review manually before replacing source context."
+    if regression_flags:
+        return "Do not adopt this candidate until regression flags are resolved: " + ", ".join(regression_flags) + "."
+    if verdict == "unchanged":
+        return "Candidate did not materially change the measured context quality."
+    return "Candidate has mixed results. Review resolved and introduced findings before deciding whether to adopt it."
+
+
+def render_candidate_report(report: dict[str, Any]) -> str:
+    deltas = report["deltas"]
+    lines = [
+        "# ContextProof Candidate Report",
+        "",
+        f"Verdict: `{report['verdict']}`",
+        f"Source: `{report['source_path']}`",
+        f"Candidate: `{report['candidate_path']}`",
+        "",
+        "## Score Delta",
+        "",
+        f"- Source score: {report['source']['score']} / 100",
+        f"- Candidate score: {report['candidate']['score']} / 100",
+        f"- Score delta: {deltas['score_delta']:+d}",
+        f"- Estimated token delta: {deltas['token_delta']:+d}",
+        f"- Critical/high finding delta: {deltas['critical_high_finding_delta']:+d}",
+        f"- Resolved findings: {deltas['resolved_finding_count']}",
+        f"- Introduced findings: {deltas['introduced_finding_count']}",
+        "",
+        "## Preservation",
+        "",
+    ]
+    preservation = report["preservation"]
+    if preservation["removed_validation_commands"]:
+        lines.append("Removed validation commands:")
+        for item in preservation["removed_validation_commands"]:
+            lines.append(f"- `{item}`")
+    else:
+        lines.append("- No explicit validation commands were removed.")
+    if preservation["removed_path_markers"]:
+        lines.append("")
+        lines.append("Removed path markers requiring review:")
+        for item in preservation["removed_path_markers"][:15]:
+            lines.append(f"- `{item}`")
+    if report["regression_flags"]:
+        lines.extend(["", "## Regression Flags", ""])
+        for item in report["regression_flags"]:
+            lines.append(f"- `{item}`")
+    lines.extend(["", "## Resolved Findings", ""])
+    if report["resolved_findings"]:
+        for item in report["resolved_findings"][:15]:
+            lines.append(f"- **{item['severity']}** `{item['id']}` in `{item['path']}`")
+    else:
+        lines.append("- None.")
+    lines.extend(["", "## Introduced Findings", ""])
+    if report["introduced_findings"]:
+        for item in report["introduced_findings"][:15]:
+            lines.append(f"- **{item['severity']}** `{item['id']}` in `{item['path']}`")
+    else:
+        lines.append("- None.")
+    lines.extend(["", "## Recommendation", "", report["recommendation"], ""])
+    return "\n".join(lines)
+
+
+def iter_scenario_dirs(root: Path) -> list[Path]:
+    if not root.exists() or not root.is_dir():
+        raise ContextProofInputError(f"Scenario directory does not exist: {root}")
+    scenarios = [path for path in root.iterdir() if (path / "expected.json").is_file() and (path / "source").exists()]
+    return sorted(scenarios, key=lambda item: item.name)
+
+
+def load_scenario_expected(scenario_dir: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads((scenario_dir / "expected.json").read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ContextProofInputError(f"Scenario expected.json is not valid JSON: {scenario_dir}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ContextProofInputError(f"Scenario expected.json must be an object: {scenario_dir}")
+    return payload
+
+
+def discover_candidate_inputs(scenario_dir: Path) -> list[Path]:
+    candidates_dir = scenario_dir / "candidates"
+    if not candidates_dir.exists():
+        return []
+    found: list[Path] = []
+    for path in sorted(candidates_dir.rglob("*")):
+        if path.is_file() and path.suffix.lower() in {".md", ".mdc", ".txt"}:
+            found.append(path)
+    if not found:
+        for path in sorted(candidates_dir.iterdir()):
+            if path.is_dir() and discover_context_files(path):
+                found.append(path)
+    return found
+
+
+def infer_prompt_variant(candidate_path: Path, scenario_dir: Path, default_variant: str) -> str:
+    candidates_dir = scenario_dir / "candidates"
+    try:
+        relative = candidate_path.relative_to(candidates_dir)
+    except ValueError:
+        return default_variant
+    if len(relative.parts) > 1:
+        return relative.parts[0]
+    return default_variant
+
+
+def build_optimizer_benchmark_rows(
+    scenarios_root: Path,
+    prompt_variant: str = "baseline",
+    deterministic: bool = False,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    for scenario_dir in iter_scenario_dirs(scenarios_root):
+        expected = load_scenario_expected(scenario_dir)
+        source = scenario_dir / "source"
+        scenario_id = str(expected.get("scenario_id") or scenario_dir.name)
+        project_mode = normalize_project_mode(str(expected.get("project_mode") or "existing_project"))
+        preserve = [str(item) for item in expected.get("preserve", []) if str(item).strip()]
+        for candidate in discover_candidate_inputs(scenario_dir):
+            comparison = compare_contexts(source, candidate, deterministic=deterministic, project_mode=project_mode)
+            candidate_text = context_input_text(candidate)
+            missing_preservation = [item for item in preserve if item not in candidate_text]
+            variant = infer_prompt_variant(candidate, scenario_dir, prompt_variant)
+            regression_flags = list(comparison["regression_flags"])
+            if missing_preservation:
+                regression_flags.append("missing-expected-preservation")
+            score_delta = int(comparison["deltas"]["score_delta"])
+            token_delta = int(comparison["deltas"]["token_delta"])
+            critical_high_delta = int(comparison["deltas"]["critical_high_finding_delta"])
+            success = (
+                comparison["verdict"] == "improved"
+                and score_delta >= 0
+                and token_delta <= 0
+                and critical_high_delta <= 0
+                and not regression_flags
+            )
+            rows.append(
+                {
+                    "schema_version": SCHEMA_VERSION,
+                    "generated_at": generated_at,
+                    "run_id": f"{scenario_id}:{variant}:{candidate.name}",
+                    "scenario_id": scenario_id,
+                    "prompt_variant": variant,
+                    "project_mode": project_mode,
+                    "source_path": str(source.resolve()),
+                    "candidate_path": str(candidate.resolve()),
+                    "verdict": comparison["verdict"],
+                    "success": success,
+                    "score_delta": score_delta,
+                    "token_delta": token_delta,
+                    "critical_high_finding_delta": critical_high_delta,
+                    "resolved_finding_count": comparison["deltas"]["resolved_finding_count"],
+                    "introduced_finding_count": comparison["deltas"]["introduced_finding_count"],
+                    "source_score": comparison["source"]["score"],
+                    "candidate_score": comparison["candidate"]["score"],
+                    "source_tokens": comparison["source"]["total_context_tokens"],
+                    "candidate_tokens": comparison["candidate"]["total_context_tokens"],
+                    "regression_flags": regression_flags,
+                    "removed_validation_commands": comparison["preservation"]["removed_validation_commands"],
+                    "missing_expected_preservation": missing_preservation,
+                }
+            )
+    return rows
+
+
+def summarize_optimizer_benchmark(rows: list[dict[str, Any]], prompt_variant: str) -> dict[str, Any]:
+    variants: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        variants.setdefault(str(row["prompt_variant"]), []).append(row)
+    variant_summaries: dict[str, dict[str, Any]] = {}
+    for variant, items in sorted(variants.items()):
+        score_deltas = [float(item["score_delta"]) for item in items]
+        token_deltas = [float(item["token_delta"]) for item in items]
+        critical_deltas = [float(item["critical_high_finding_delta"]) for item in items]
+        successes = [1.0 if item.get("success") else 0.0 for item in items]
+        variant_summaries[variant] = {
+            "runs": len(items),
+            "success_rate": mean_or_none(successes) or 0.0,
+            "avg_score_delta": mean_or_none(score_deltas),
+            "avg_token_delta": mean_or_none(token_deltas),
+            "avg_critical_high_finding_delta": mean_or_none(critical_deltas),
+            "regression_count": sum(1 for item in items if item.get("regression_flags")),
+        }
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "benchmark_type": "context_optimizer",
+        "default_prompt_variant": prompt_variant,
+        "run_count": len(rows),
+        "scenario_count": len({str(row["scenario_id"]) for row in rows}),
+        "variants": variant_summaries,
+    }
+
+
+def render_optimizer_benchmark_markdown(summary: dict[str, Any], rows: list[dict[str, Any]]) -> str:
+    lines = [
+        "# ContextProof Optimizer Benchmark",
+        "",
+        f"Runs: {summary['run_count']}",
+        f"Scenarios: {summary['scenario_count']}",
+        "",
+        "## Variants",
+        "",
+    ]
+    for variant, item in summary["variants"].items():
+        lines.append(f"### {variant}")
+        lines.append("")
+        lines.append(f"- Runs: {item['runs']}")
+        lines.append(f"- Success rate: {item['success_rate']:.2%}")
+        if item["avg_score_delta"] is not None:
+            lines.append(f"- Avg score delta: {item['avg_score_delta']:+.1f}")
+        if item["avg_token_delta"] is not None:
+            lines.append(f"- Avg token delta: {item['avg_token_delta']:+.1f}")
+        if item["avg_critical_high_finding_delta"] is not None:
+            lines.append(f"- Avg critical/high finding delta: {item['avg_critical_high_finding_delta']:+.1f}")
+        lines.append(f"- Regression count: {item['regression_count']}")
+        lines.append("")
+    lines.extend(["## Runs", ""])
+    if not rows:
+        lines.append("- No candidate runs found.")
+    for row in rows:
+        lines.append(f"### {row['scenario_id']} / {row['prompt_variant']}")
+        lines.append("")
+        lines.append(f"- Verdict: `{row['verdict']}`")
+        lines.append(f"- Success: `{row['success']}`")
+        lines.append(f"- Score delta: {row['score_delta']:+d}")
+        lines.append(f"- Token delta: {row['token_delta']:+d}")
+        lines.append(f"- Critical/high finding delta: {row['critical_high_finding_delta']:+d}")
+        if row["regression_flags"]:
+            lines.append(f"- Regression flags: {', '.join(f'`{item}`' for item in row['regression_flags'])}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def normalize_run(row: dict[str, Any]) -> dict[str, Any]:
@@ -1400,6 +1830,55 @@ def command_summarize_runs(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_compare_context(args: argparse.Namespace) -> int:
+    source = Path(args.source)
+    candidate = Path(args.candidate)
+    if not source.exists():
+        raise ContextProofInputError(f"Source context path does not exist: {source}")
+    if not candidate.exists():
+        raise ContextProofInputError(f"Candidate context path does not exist: {candidate}")
+    report = compare_contexts(
+        source,
+        candidate,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else Path.cwd() / ".contextproof"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "candidate-report.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "candidate-report.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_candidate_report(report), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def command_benchmark_optimizer(args: argparse.Namespace) -> int:
+    scenarios_root = Path(args.scenarios).resolve()
+    rows = build_optimizer_benchmark_rows(
+        scenarios_root,
+        prompt_variant=args.prompt_variant,
+        deterministic=args.deterministic,
+    )
+    summary = summarize_optimizer_benchmark(rows, args.prompt_variant)
+    if args.jsonl_out:
+        target = Path(args.jsonl_out)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(json.dumps(row, sort_keys=True) for row in rows) + ("\n" if rows else ""), encoding="utf-8")
+    if args.json_out:
+        target = Path(args.json_out)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
+    if args.md_out:
+        target = Path(args.md_out)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(render_optimizer_benchmark_markdown(summary, rows), encoding="utf-8")
+    print(json.dumps(summary, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Audit and benchmark AI agent context files.")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -1458,6 +1937,30 @@ def build_parser() -> argparse.ArgumentParser:
     runs.add_argument("--md-out", help="Write markdown summary to this path.")
     runs.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     runs.set_defaults(func=command_summarize_runs)
+
+    compare = subparsers.add_parser("compare-context", help="Compare original agent context with an optimized candidate.")
+    compare.add_argument("source", help="Original context file or repository directory.")
+    compare.add_argument("candidate", help="Candidate context file or repository directory.")
+    compare.add_argument("--json-out", help="Write JSON candidate comparison to this path.")
+    compare.add_argument("--md-out", help="Write markdown candidate comparison to this path.")
+    compare.add_argument("--output-dir", help="Write default candidate reports to this directory.")
+    compare.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    compare.add_argument(
+        "--project-mode",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
+    )
+    compare.set_defaults(func=command_compare_context)
+
+    optimizer = subparsers.add_parser("benchmark-optimizer", help="Record optimizer candidate results across scenario fixtures.")
+    optimizer.add_argument("scenarios", nargs="?", default="examples/scenarios", help="Directory containing scenario fixtures.")
+    optimizer.add_argument("--prompt-variant", default="baseline", help="Prompt variant label for flat candidate directories.")
+    optimizer.add_argument("--jsonl-out", help="Write per-candidate benchmark rows as JSONL.")
+    optimizer.add_argument("--json-out", help="Write benchmark summary JSON.")
+    optimizer.add_argument("--md-out", help="Write benchmark summary markdown.")
+    optimizer.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    optimizer.set_defaults(func=command_benchmark_optimizer)
 
     return parser
 

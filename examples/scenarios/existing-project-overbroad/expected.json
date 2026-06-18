@@ -1,0 +1,13 @@
+{
+  "scenario_id": "existing-project-overbroad",
+  "project_mode": "existing_project",
+  "expected_issue_ids": [
+    "vague-rule",
+    "overbroad-context"
+  ],
+  "preserve": [
+    "pytest tests/unit",
+    "src/app",
+    "tests/helpers.py"
+  ]
+}

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "contextproof"
-version = "0.2.1"
+version = "0.3.0"
 description = "Audit and benchmark repository-level AI agent context files."
 requires-python = ">=3.11"
 readme = "README.md"

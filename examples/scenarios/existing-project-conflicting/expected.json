@@ -1,0 +1,12 @@
+{
+  "scenario_id": "existing-project-conflicting",
+  "project_mode": "existing_project",
+  "expected_issue_ids": [
+    "conflicting-rule",
+    "duplicate-rule",
+    "vague-rule"
+  ],
+  "preserve": [
+    "npm test"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "scenario_id": "unsafe-automation",
+  "project_mode": "existing_project",
+  "expected_issue_ids": [
+    "risky-shell"
+  ],
+  "preserve": [
+    "pytest"
+  ]
+}

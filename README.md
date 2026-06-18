@@ -1,6 +1,7 @@
 # ContextProof
 
-Audit the instructions your coding agent reads before it edits code.
+Audit and optimize the instructions your coding agent reads before it edits
+code.
 
 [中文 README](README.zh-CN.md)
 
@@ -12,21 +13,25 @@ ContextProof is not a general Markdown optimizer or linter. It only audits
 Markdown that is loaded as coding-agent context.
 
 It looks for instructions that are vague, contradictory, unsafe, too broad,
-hard to validate, or wasteful for the model to carry on every task.
+hard to validate, or wasteful for the model to carry on every task. It can also
+guide your coding agent to draft a safer, shorter candidate context file and
+then compare that candidate against the original.
 
 ## Copy Into Your Agent
 
 ```text
 Install ContextProof from https://github.com/LuneZhang/ContextProof.
-Use the context-proof skill to audit this repository's agent context.
-Generate .contextproof/report.md and .contextproof/pr-comment.md.
+Use the context-proof skill to audit and optimize this repository's agent context.
+Write optimized drafts under .contextproof/candidates/.
+Compare the original and candidate context.
 Do not overwrite AGENTS.md, CLAUDE.md, .cursor/rules, SKILL.md, or other context files.
 ```
 
 Codex direct form after installing the skill:
 
 ```text
-Use $context-proof to audit this repository's agent context.
+Use $context-proof to audit and optimize this repository's agent context.
+Write optimized drafts under .contextproof/candidates/ and compare them against the originals.
 ```
 
 Expected output:
@@ -43,6 +48,8 @@ Findings:
 Generated:
 - .contextproof/report.md
 - .contextproof/pr-comment.md
+- .contextproof/candidates/AGENTS.contextproof.md
+- .contextproof/candidate-report.md
 ```
 
 ## Try The Demo
@@ -70,6 +77,16 @@ Run ContextProof after changing `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`,
 ```bash
 contextproof audit . --pr-comment
 ```
+
+To compare an optimized candidate against the original context:
+
+```bash
+contextproof compare-context AGENTS.md .contextproof/candidates/AGENTS.contextproof.md
+```
+
+The candidate report flags score delta, estimated token delta, resolved
+findings, introduced findings, removed validation commands, and preservation
+risks.
 
 If the change is part of a PR, use `.contextproof/pr-comment.md` as the local
 review summary for the context change.
@@ -267,6 +284,21 @@ Run without installing:
 
 ```bash
 python -m contextproof.cli audit /path/to/repo --pr-comment
+```
+
+Compare a source context file and an optimized candidate:
+
+```bash
+contextproof compare-context AGENTS.md .contextproof/candidates/AGENTS.contextproof.md
+```
+
+Record optimizer prompt-variant results across the included scenario fixtures:
+
+```bash
+contextproof benchmark-optimizer examples/scenarios \
+  --prompt-variant baseline \
+  --jsonl-out .contextproof/optimizer-runs.jsonl \
+  --md-out .contextproof/optimizer-summary.md
 ```
 
 ## Project Modes

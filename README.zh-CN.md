@@ -1,6 +1,6 @@
 # ContextProof
 
-审计 coding agent 在修改代码前读取的指令。
+审计并优化 coding agent 在修改代码前读取的指令。
 
 [English README](README.md)
 
@@ -11,20 +11,23 @@ ContextProof 检查会被 coding agent 读取并拼接进提示词上下文的 M
 ContextProof 不是通用 Markdown 优化器或 linter。它只审计会被加载为 coding-agent context 的 Markdown。
 
 它专门发现那些会让 agent 浪费 token、误解任务、缺少验收方式、规则互相矛盾或存在安全风险的长期指令。
+它也可以指导 coding agent 生成更短、更安全、更可执行的候选 context，并把候选稿和原文进行对比。
 
 ## 复制给你的 Agent
 
 ```text
 Install ContextProof from https://github.com/LuneZhang/ContextProof.
-Use the context-proof skill to audit this repository's agent context.
-Generate .contextproof/report.md and .contextproof/pr-comment.md.
+Use the context-proof skill to audit and optimize this repository's agent context.
+Write optimized drafts under .contextproof/candidates/.
+Compare the original and candidate context.
 Do not overwrite AGENTS.md, CLAUDE.md, .cursor/rules, SKILL.md, or other context files.
 ```
 
 Codex 安装 skill 后可以直接说：
 
 ```text
-Use $context-proof to audit this repository's agent context.
+Use $context-proof to audit and optimize this repository's agent context.
+Write optimized drafts under .contextproof/candidates/ and compare them against the originals.
 ```
 
 预期输出示例：
@@ -41,6 +44,8 @@ Findings:
 Generated:
 - .contextproof/report.md
 - .contextproof/pr-comment.md
+- .contextproof/candidates/AGENTS.contextproof.md
+- .contextproof/candidate-report.md
 ```
 
 ## 试运行 Demo
@@ -67,6 +72,14 @@ python -m contextproof.cli audit examples/team-agent-context --pr-comment
 ```bash
 contextproof audit . --pr-comment
 ```
+
+如果要对比优化候选稿和原始 context：
+
+```bash
+contextproof compare-context AGENTS.md .contextproof/candidates/AGENTS.contextproof.md
+```
+
+候选报告会标出分数变化、预估 token 变化、已解决 findings、新增 findings、被删除的验证命令和需要人工复核的保留风险。
 
 如果这些文件变更属于 PR，可以把 `.contextproof/pr-comment.md` 作为本地 PR review 摘要。
 
@@ -258,6 +271,21 @@ contextproof audit C:\path\to\repo --pr-comment
 
 ```bash
 python -m contextproof.cli audit /path/to/repo --pr-comment
+```
+
+对比原始 context 和优化候选稿：
+
+```bash
+contextproof compare-context AGENTS.md .contextproof/candidates/AGENTS.contextproof.md
+```
+
+用内置场景记录优化器 prompt 变体的结果：
+
+```bash
+contextproof benchmark-optimizer examples/scenarios \
+  --prompt-variant baseline \
+  --jsonl-out .contextproof/optimizer-runs.jsonl \
+  --md-out .contextproof/optimizer-summary.md
 ```
 
 ## 项目模式

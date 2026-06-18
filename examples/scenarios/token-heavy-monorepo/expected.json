@@ -1,0 +1,15 @@
+{
+  "scenario_id": "token-heavy-monorepo",
+  "project_mode": "existing_project",
+  "expected_issue_ids": [
+    "vague-rule",
+    "overbroad-context",
+    "duplicate-rule"
+  ],
+  "preserve": [
+    "apps/web",
+    "services/api",
+    "packages/ui",
+    "pnpm test"
+  ]
+}

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0
+
+- Repositioned ContextProof around the core agent-context optimization loop:
+  audit source context, draft safe candidates, compare candidates, and benchmark
+  prompt variants.
+- Added `compare-context` for original-versus-candidate evaluation with score
+  delta, token delta, resolved and introduced findings, preservation checks,
+  and regression flags.
+- Added `benchmark-optimizer` for recording optimizer prompt-variant results
+  across scenario fixtures as JSONL and markdown summaries.
+- Added a V0.3 scenario corpus covering overbroad context, conflicting context,
+  saved `/init` briefs, multi-agent migration, unsafe automation, missing
+  validation criteria, misplaced general documentation, and token-heavy
+  monorepo context.
+- Added optimizer prompt references and an explicit skill workflow that writes
+  candidates under `.contextproof/candidates/` without overwriting source
+  context files.
+- Updated English and Chinese documentation to make context optimization the
+  primary user workflow.
+
 ## 0.2.1
 
 - Added changed agent-context file detection from local git state or a git ref/range.

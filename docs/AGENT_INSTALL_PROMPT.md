@@ -16,10 +16,12 @@ Goal:
 - Treat ContextProof as an auditor for agent-facing Markdown context, not as a
   general Markdown optimizer.
 
-After installation, use the context-proof skill to audit this repository's
-agent context. Generate:
+After installation, use the context-proof skill to audit and optimize this
+repository's agent context. Generate:
 - .contextproof/report.md
 - .contextproof/pr-comment.md
+- optimized candidate drafts under .contextproof/candidates/
+- .contextproof/candidate-report.md
 
 Do not overwrite AGENTS.md, CLAUDE.md, .cursor/rules, SKILL.md, or other
 existing context files.
@@ -29,6 +31,9 @@ python -m pip install -e .
 
 If the contextproof command is unavailable, run:
 python -m contextproof.cli audit . --pr-comment
+
+After drafting a candidate, compare it with:
+python -m contextproof.cli compare-context SOURCE_CONTEXT_PATH CANDIDATE_CONTEXT_PATH
 
 When reviewing a PR that changes agent context files, preserve the generated
 .contextproof/pr-comment.md as the local review summary.

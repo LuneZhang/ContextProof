@@ -1,6 +1,6 @@
 ---
 name: context-proof
-description: Audit and benchmark repository-level AI coding-agent context files with deterministic evidence. Use when an agent needs to evaluate AGENTS.md, CLAUDE.md, SKILL.md, .cursor/rules, MCP notes, or other coding-agent instructions; detect risky, vague, duplicated, oversized, or contradictory rules; optionally generate a generic starter scaffold only when explicitly requested; or summarize recorded agent benchmark runs across variants such as none, current, native-init, and contextproof-reviewed.
+description: Audit, optimize, and benchmark repository-level AI coding-agent context files with deterministic evidence. Use when an agent needs to evaluate or improve AGENTS.md, CLAUDE.md, SKILL.md, .cursor/rules, MCP notes, saved /init briefs, or other coding-agent instructions; detect risky, vague, duplicated, oversized, or contradictory rules; generate safe optimized candidate drafts under .contextproof/candidates; compare original context against candidates; or summarize recorded agent benchmark runs across variants such as none, current, native-init, and contextproof-reviewed.
 ---
 
 # ContextProof
@@ -20,7 +20,7 @@ and `/init` output only after it has been saved as a persistent context file.
 Do not treat ordinary README files, design docs, or one-off chat prompts as
 audit targets unless they are actually injected into agent context.
 
-## Primary Workflow
+## Primary Workflow: Audit
 
 1. Identify the repository to audit. Use the current working directory unless
    the user gives another path.
@@ -61,6 +61,44 @@ audit targets unless they are actually injected into agent context.
    overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or other
    context files unless the user explicitly asks.
 
+## Optimization Workflow
+
+Use this workflow when the user asks to optimize, tighten, reduce, improve, or
+rewrite agent context.
+
+1. Read `references/context-optimizer.md` and
+   `references/optimization-checklist.md`.
+
+2. Run the audit workflow first and read the findings.
+
+3. Pick the source context file that should be optimized. If multiple files
+   overlap, optimize one clear candidate first unless the user asks for a
+   migration pass.
+
+4. Write the optimized candidate under `.contextproof/candidates/`. Preserve
+   source filenames when possible, for example
+   `.contextproof/candidates/AGENTS.contextproof.md`.
+
+5. Do not overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or
+   other source context files unless the user explicitly approves after seeing
+   the candidate and comparison report.
+
+6. Compare the original and candidate:
+
+   ```bash
+   python scripts/contextproof.py compare-context /path/to/source/AGENTS.md /path/to/repo/.contextproof/candidates/AGENTS.contextproof.md
+   ```
+
+   If the installed CLI is available:
+
+   ```bash
+   contextproof compare-context /path/to/source/AGENTS.md /path/to/repo/.contextproof/candidates/AGENTS.contextproof.md
+   ```
+
+7. Report the candidate path, score delta, estimated token delta, resolved
+   findings, introduced findings, preservation warnings, regression flags, and
+   generated candidate report path.
+
 ## Benchmark Runs
 
 If recorded benchmark runs exist, summarize them:
@@ -78,6 +116,22 @@ python scripts/contextproof.py audit /path/to/repo --runs /path/to/runs.jsonl --
 Read `references/benchmark-design.md` before designing or changing benchmark
 inputs.
 
+## Optimizer Prompt Benchmarks
+
+When comparing optimizer prompt variants, use the scenario corpus and candidate
+outputs:
+
+```bash
+python scripts/contextproof.py benchmark-optimizer /path/to/repo/examples/scenarios \
+  --prompt-variant baseline \
+  --jsonl-out /path/to/repo/.contextproof/optimizer-runs.jsonl \
+  --md-out /path/to/repo/.contextproof/optimizer-summary.md
+```
+
+The runner does not call an LLM. It records results for candidates already
+written by the active coding agent, so prompt variants can be compared on the
+same fixtures without guessing.
+
 ## Evidence Model
 
 - Static hygiene: deterministic scan and six-dimension score for
@@ -88,10 +142,13 @@ inputs.
 
 Read `references/scoring-rubric.md` before changing scoring weights or severity
 levels. Read `references/context-antipatterns.md` when explaining findings.
+Read `references/context-optimizer.md` before drafting optimized context.
 
 ## Output Policy
 
 - Lead with static score, confidence state, and critical/high findings.
 - Distinguish static risk from measured benchmark outcomes.
 - Avoid claiming performance improvement unless behavioral run data supports it.
-- Do not present deterministic findings as a project-specific rewrite plan.
+- Do not present deterministic findings alone as proof that a rewrite is better.
+- For optimization requests, provide a candidate and compare it against the
+  original. Treat regression flags as blockers until reviewed.

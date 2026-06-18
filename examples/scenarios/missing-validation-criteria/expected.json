@@ -1,0 +1,12 @@
+{
+  "scenario_id": "missing-validation-criteria",
+  "project_mode": "existing_project",
+  "expected_issue_ids": [
+    "vague-rule",
+    "missing-test-command"
+  ],
+  "preserve": [
+    "src/payments",
+    "jobs/billing.py"
+  ]
+}

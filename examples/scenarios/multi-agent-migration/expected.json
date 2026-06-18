@@ -1,0 +1,13 @@
+{
+  "scenario_id": "multi-agent-migration",
+  "project_mode": "migration_project",
+  "expected_issue_ids": [
+    "duplicate-rule",
+    "conflicting-rule",
+    "vague-rule"
+  ],
+  "preserve": [
+    "make test",
+    "services/api"
+  ]
+}

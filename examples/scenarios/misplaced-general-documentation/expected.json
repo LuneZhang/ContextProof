@@ -1,0 +1,10 @@
+{
+  "scenario_id": "misplaced-general-documentation",
+  "project_mode": "existing_project",
+  "expected_issue_ids": [
+    "misplaced-general-docs"
+  ],
+  "preserve": [
+    "pytest tests/invoices"
+  ]
+}

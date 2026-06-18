@@ -1,0 +1,5 @@
+# Cursor Rules
+
+- Keep changes scoped to the requested task.
+- Must run tests before final response.
+- Backend code lives in `services/api`.
