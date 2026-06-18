@@ -1,10 +1,23 @@
 {
   "scenario_id": "misplaced-general-documentation",
   "project_mode": "existing_project",
+  "expected_primary_scenario": "token-heavy-context",
   "expected_issue_ids": [
     "misplaced-general-docs"
   ],
   "preserve": [
     "pytest tests/invoices"
+  ],
+  "gold_path": "gold/AGENTS.gold.md",
+  "gold_primary_scenario": "token-heavy-context",
+  "gold_must_preserve": [
+    "pytest tests/invoices",
+    "invoice workflow"
+  ],
+  "gold_must_remove_issue_ids": [
+    "misplaced-general-docs"
+  ],
+  "gold_allowed_tradeoffs": [
+    "Product context may be summarized only when it directly constrains code edits."
   ]
 }

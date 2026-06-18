@@ -1,8 +1,8 @@
 # TODO
 
-This document is the V0.3 implementation checklist. V0.3 must stay focused on
-ContextProof's real product core: optimizing persistent Markdown context for
-coding agents.
+This checklist tracks the current product route. ContextProof must stay focused
+on one job: improving persistent Markdown context that coding agents actually
+read.
 
 ## Product Essence
 
@@ -26,283 +26,109 @@ The user should install the skill, then ask their coding agent to audit and
 improve those files in natural language. The deterministic CLI is the runner
 behind the skill, not the product's primary identity.
 
-## What V0.3 Must Improve
+## V0.5.1 Definition Of Done
 
-V0.1 and V0.2 built the deterministic auditor. V0.3 should build the
-optimization loop around that auditor:
+V0.5.1 is complete when ContextProof feels like a small, ready-to-use skill
+instead of a pile of CLI commands:
 
-1. Scenario fixtures: realistic bad, bloated, conflicting, or vague agent
-   context documents.
-2. Optimizer prompt: the instructions the coding agent uses to produce a better
-   candidate context document.
-3. Candidate safety: optimized drafts are written to `.contextproof/candidates/`
-   and never overwrite source files automatically.
-4. Candidate evaluation: compare original versus candidate with static score,
-   token/length delta, issue delta, preserved requirements, and unresolved
-   risks.
-5. Prompt iteration benchmark: run the same scenario fixtures against optimizer
-   prompt variants so we can improve the optimizer instead of guessing.
+- The README starts with one agent prompt and one install path.
+- The Chinese README mirrors the same short adoption path.
+- `SKILL.md` stays concise and points to references only when needed.
+- Maintainer-only commands are clearly separated from the user workflow.
+- Capability boundaries and size-control rules are documented.
+- Package and skill metadata are `0.5.1`; report schema remains `0.5.0`.
 
-## Definition Of Done
+## V0.5.1: Skill-First Adoption Polish
 
-V0.3 is complete when a user can:
+- [x] Rewrite README around the copy-into-agent prompt.
+- [x] Rewrite Chinese README around the same usage path.
+- [x] Compress `skill/context-proof/SKILL.md`.
+- [x] Add `docs/CAPABILITY_BOUNDARIES.md`.
+- [x] Keep gold, benchmark, calibration, and acceptance as maintainer flows.
+- [x] Bump package and skill metadata to `0.5.1`.
 
-- Ask a coding agent to use ContextProof to optimize repository agent context.
-- Receive an optimized candidate file without losing the original context file.
-- See exactly which problems were fixed, which remain, and which requirements
-  were preserved.
-- Compare before and after scores and approximate token cost.
-- Run the included scenario fixtures to evaluate whether a prompt change made
-  the optimizer better.
-- Understand that ContextProof optimizes agent-facing context quality, not
-  general project documentation.
+## V0.5 Definition Of Done
 
-## V0.3.0: Scenario Corpus
+V0.5 is complete when ContextProof can judge its own optimizer outputs against
+curated references:
 
-Goal: create the testbed used to improve the optimizer prompt.
-
-### Fixtures To Add
-
-- [x] `examples/scenarios/existing-project-overbroad/`
-  - A realistic `AGENTS.md` that asks the agent to read the whole repo,
-    over-explains obvious rules, and lacks targeted validation.
-- [x] `examples/scenarios/existing-project-conflicting/`
-  - Context files with contradictory instructions, duplicated rules, and mixed
-    agent-specific conventions.
-- [x] `examples/scenarios/new-project-init-brief/`
-  - A saved `/init`-style project brief for a new repository. It should be
-    useful but too verbose and weak on acceptance criteria.
-- [x] `examples/scenarios/multi-agent-migration/`
-  - A project with `AGENTS.md`, `CLAUDE.md`, and `.cursor/rules` that overlap
-    and drift from each other.
-- [x] `examples/scenarios/unsafe-automation/`
-  - Context that includes dangerous shell shortcuts, implicit network install
-    commands, and unclear permission boundaries.
-- [x] `examples/scenarios/missing-validation-criteria/`
-  - Context that asks for quality and caution but provides no concrete
-    validation command or acceptance check.
-- [x] `examples/scenarios/misplaced-general-documentation/`
-  - Context that pastes ordinary product or planning notes into persistent
-    agent instructions.
-- [x] `examples/scenarios/token-heavy-monorepo/`
-  - A long monorepo context document with repeated directory maps, duplicated
-    workflows, and irrelevant prose.
-
-### Fixture Metadata
-
-Each scenario should include:
-
-- [x] `README.md`: what the scenario represents.
-- [x] `source/`: original context files.
-- [x] `expected.json`: expected issue categories and preservation requirements.
-- [x] `notes.md`: why the fixture matters and what a good optimizer should do.
-
-### Expected Issue Categories
-
-- [x] vague or non-verifiable instruction
-- [x] overbroad repository exploration
-- [x] missing validation command
-- [x] unsafe shell or install guidance
-- [x] conflicting instruction
-- [x] duplicated instruction
-- [x] oversized or token-wasteful context
-- [x] misplaced general documentation
-
-## V0.3.1: Optimizer Prompt Pack
-
-Goal: make the skill's optimizer instructions a first-class artifact.
-
-### Skill Files
-
-- [x] Add `skill/context-proof/references/context-optimizer.md`.
-- [x] Add `skill/context-proof/references/optimization-checklist.md`.
-- [x] Update `skill/context-proof/SKILL.md` with an explicit optimization
-  workflow.
-
-### Optimizer Prompt Contract
-
-The optimizer prompt must instruct the coding agent to:
-
-- [x] Read ContextProof findings first.
-- [x] Identify which context files are actually agent-facing.
-- [x] Preserve project-specific commands, paths, architecture facts, and safety
+- All eight built-in scenarios have gold/reference candidates.
+- `evaluate-gold` can distinguish true improvement from candidates that delete
+  validation commands, path anchors, safety boundaries, or required project
   constraints.
-- [x] Remove or tighten vague rules.
-- [x] Convert broad mandates into task-scoped behavior.
-- [x] Add or preserve concrete validation commands.
-- [x] Deduplicate repeated instructions.
-- [x] Separate stable project rules from one-off task notes.
-- [x] Reduce token load without deleting essential operating constraints.
-- [x] Write candidates under `.contextproof/candidates/`.
-- [x] Produce a concise rationale and unresolved-risk list.
-- [x] Never overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or
-  other source context files unless the user explicitly approves.
+- `benchmark-optimizer` reports gold alignment fields and route-level gold
+  metrics.
+- `calibrate-scorer` reports expected issue, severity, dimension, and score
+  bucket mismatches on a focused calibration set.
+- `make acceptance` runs the complete local v0.5 acceptance flow.
+- The standalone skill runner supports the same commands as the package CLI.
 
-### Output Format
+## V0.5.0: Gold Candidates
 
-The optimizer should produce:
+- [x] Add `gold/AGENTS.gold.md` for:
+  - [x] `existing-project-overbroad`
+  - [x] `existing-project-conflicting`
+  - [x] `new-project-init-brief`
+  - [x] `multi-agent-migration`
+  - [x] `unsafe-automation`
+  - [x] `missing-validation-criteria`
+  - [x] `misplaced-general-documentation`
+  - [x] `token-heavy-monorepo`
+- [x] Add v0.5 gold metadata to each `expected.json`.
+- [x] Keep gold candidates as benchmark references, not user-project answers.
 
-- [x] candidate file path
-- [x] source file path
-- [x] high-level transformation summary
-- [x] preserved requirements
-- [x] removed or compressed sections
-- [x] unresolved findings
-- [x] suggested next manual review step
+## V0.5 Gold Evaluation
 
-## V0.3.2: Candidate Evaluation
+- [x] Add `evaluate-gold SCENARIO_DIR CANDIDATE_PATH`.
+- [x] Write `.contextproof/gold-evaluation.json`.
+- [x] Write `.contextproof/gold-evaluation.md`.
+- [x] Evaluate source vs candidate, source vs gold, and candidate vs gold.
+- [x] Return verdicts for gold alignment, partial alignment,
+  overcompression, unsafe regression, missing preservation, and not improved.
+- [x] Detect deleted validation commands, risky shell regressions, and
+  overcompressed candidates.
 
-Goal: compare the original context and optimized candidate without relying on
-trust or vibes.
+## V0.5 Benchmark Extension
 
-### CLI Or Runner Capability
+- [x] Add gold fields to optimizer benchmark rows.
+- [x] Add gold alignment, unsafe regression, overcompression, and
+  missing-preservation counts to summaries.
+- [x] Keep success criteria strict: no unsafe regression, no missing
+  preservation, no critical/high finding growth, and gold alignment required
+  when a scenario has a gold candidate.
 
-- [x] Add a candidate comparison command or mode.
-  - Candidate name can be `contextproof compare-context`.
-  - Alternative: add `contextproof audit --candidate PATH`.
-  - Choose the smaller implementation after reading the existing CLI structure.
-- [x] Compare source and candidate with the same deterministic auditor.
-- [x] Report before score, after score, and score delta.
-- [x] Report finding counts by severity before and after.
-- [x] Report approximate token or character delta.
-- [x] Report preserved explicit commands and paths where detectable.
-- [x] Report new risks introduced by the candidate.
-- [x] Write `.contextproof/candidate-report.json`.
-- [x] Write `.contextproof/candidate-report.md`.
+## V0.5 Scorer Calibration
 
-### Evaluation Metrics
+- [x] Add `examples/calibration/cases.jsonl`.
+- [x] Add `calibrate-scorer`.
+- [x] Report missing expected issues, unexpected issues, severity mismatches,
+  dimension mismatches, score bucket mismatches, and failed cases.
+- [x] Calibrate only rules needed for candidate evaluation.
 
-- [x] static score delta
-- [x] critical/high finding delta
-- [x] approximate token delta
-- [x] validation-command preservation
-- [x] path/command preservation
-- [x] unresolved issue list
-- [x] newly introduced issue list
+## V0.5 Acceptance Flow
 
-### Safety Contract
+- [x] Add `scripts/acceptance_v05.py`.
+- [x] Add `make acceptance`.
+- [x] Verify tests, scenario integrity, classification routes, gold self
+  evaluation, bad-candidate detection, optimizer benchmark, scorer calibration,
+  standalone runner, self-audit, and file hygiene.
+- [x] Use exit code 0 for pass, 1 for failed checks, 2 for fixture errors, and
+  3 for internal errors.
 
-- [x] Candidate evaluation must never write over source context files.
-- [x] If a candidate removes all validation commands, flag it as a regression.
-- [x] If a candidate removes all project-specific paths or commands, flag it for
-  manual review.
-- [x] If a candidate improves brevity but increases safety risk, do not label it
-  as a clean improvement.
+## V0.5 Documentation And Release Hardening
 
-## V0.3.3: Prompt Variant Benchmark
+- [x] Update README and Chinese README.
+- [x] Update roadmap, TODO, usage docs, skill instructions, and reference docs.
+- [x] Bump package, schema, skill metadata, and changelog to `0.5.0`.
+- [x] Sync the package CLI into the standalone skill runner.
+- [x] Add tests for gold evaluation, scorer calibration, benchmark gold fields,
+  acceptance success path, and acceptance fixture-error path.
 
-Goal: make optimizer prompt iteration measurable.
+## Non-Goals
 
-### Prompt Variants
-
-- [x] Store optimizer prompt variants under
-  `benchmarks/prompts/context-optimizer/`.
-- [x] Keep a canonical baseline prompt.
-- [x] Keep experiment prompts small and named by intent, for example:
-  `compactness-first.md`, `validation-first.md`, `migration-aware.md`.
-
-### Benchmark Runner
-
-- [x] Add a lightweight script or command that records scenario results for a
-  prompt variant.
-- [x] The runner may be semi-manual if the active coding agent performs the LLM
-  rewrite step.
-- [x] Record results as JSONL using the existing benchmark style where possible.
-- [x] Include scenario id, prompt variant, source file, candidate file, score
-  delta, token delta, preserved requirements, and regression flags.
-
-### Benchmark Acceptance
-
-- [x] A prompt variant is better only if it improves or preserves:
-  - score delta
-  - critical/high finding reduction
-  - token delta
-  - validation-command preservation
-  - safety risk count
-- [x] A prompt variant that deletes important project constraints is worse even
-  if it shortens the file.
-
-## V0.3.4: User-Facing Workflow
-
-Goal: make the actual skill workflow obvious.
-
-### README Changes
-
-- [x] Move "optimize agent context" to the primary README flow.
-- [x] Show a copyable prompt:
-
-```text
-Use $context-proof to audit and optimize this repository's agent context.
-Write optimized drafts under .contextproof/candidates/.
-Do not overwrite source context files.
-Then compare the original and candidate and report score delta, token delta,
-preserved requirements, unresolved risks, and generated files.
-```
-
-- [x] Keep CLI as a fallback runner, not the headline.
-- [x] Explain that ContextProof does not optimize ordinary docs.
-- [x] Explain that static score is hygiene evidence, not proof of real coding
-  performance.
-
-### Chinese README Changes
-
-- [x] Mirror the primary workflow in Chinese.
-- [x] Clarify the product promise in Chinese:
-  ContextProof optimizes Markdown context that coding agents actually read.
-
-### Skill Usage Docs
-
-- [x] Update `docs/USAGE_BY_AGENT.md` to show the optimize workflow for Codex,
-  Claude Code, OpenCode, Cursor, Windsurf, and Pi.
-- [x] Update `docs/AGENT_INSTALL_PROMPT.md` so installation flows into audit,
-  candidate generation, and candidate evaluation.
-
-## V0.3.5: Release Hardening
-
-Goal: ship the optimizer loop without broadening scope.
-
-### Required Tests
-
-- [x] Existing unit tests still pass:
-  `python -m unittest discover -s tests`.
-- [x] Each scenario fixture produces expected issue categories.
-- [x] Candidate comparison catches a deliberately bad "short but unsafe"
-  candidate.
-- [x] Candidate comparison catches a candidate that deletes validation commands.
-- [x] Candidate comparison marks a genuinely improved fixture candidate as
-  improved.
-- [x] Standalone skill script still runs outside the repository.
-- [x] Install script smoke tests still pass or skip appropriately by platform.
-
-### Required Demos
-
-- [x] Demo: bad context -> optimized candidate -> improved candidate report.
-- [x] Demo: new-project init brief -> tighter agent context candidate.
-- [x] Demo: multi-agent migration -> reduced duplication candidate.
-
-### Release Tasks
-
-- [x] Bump package version to `0.3.0`.
-- [x] Bump skill metadata version to `0.3.0`.
-- [x] Bump report schema version to `0.3.0` for V0.3 outputs.
-- [x] Update `CHANGELOG.md`.
-- [x] Tag `v0.3.0`.
-- [x] Push `main` and the tag.
-
-## Explicit Non-Goals For V0.3
-
-- [x] GitHub Action packaging as the main feature.
-- [x] Hosted dashboards.
-- [x] Browser UI.
-- [x] Automatic source-file replacement.
-- [x] PyPI publishing unless needed for installation clarity.
-- [x] General Markdown linting.
-- [x] Broad static-rule expansion unrelated to candidate optimization.
-- [x] Claims of real coding-agent performance improvement without behavioral
-  benchmark evidence.
-
-## Later Versions
-
-- V0.4: distribution surfaces such as GitHub Actions and PR comments.
-- V0.5: native `/init` baseline collectors for different agents.
-- V0.6: larger scorer calibration and optional LLM advisory workflows.
+- [x] Do not create an industry template library.
+- [x] Do not make CI or GitHub Actions the primary product loop.
+- [x] Do not automatically replace user context files.
+- [x] Do not claim improved coding-agent performance without behavioral runs.
+- [x] Do not optimize ordinary project documentation unless it is actually
+  injected into agent context.

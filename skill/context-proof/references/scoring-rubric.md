@@ -39,6 +39,30 @@ Confidence multipliers:
 Critical safety findings cap the total score at 69 unless a future release can
 explicitly mark the finding as non-exploitable.
 
+## Calibration
+
+Scoring changes must be checked with:
+
+```bash
+python scripts/contextproof.py calibrate-scorer examples/calibration/cases.jsonl
+```
+
+Calibration cases declare expected issue ids, severity, scoring dimensions, and
+score buckets. The report must list missing expected issues, unexpected issues,
+severity mismatches, dimension mismatches, score bucket mismatches, and failed
+cases.
+
+Do not add broad Markdown style rules to improve calibration numbers. Add or
+adjust deterministic rules only when they affect agent-facing context quality or
+candidate evaluation.
+
+## Validation Gap Policy
+
+An explicit instruction to report a missing validation command and describe
+manual checks can satisfy actionability for repositories where no test, lint,
+typecheck, build, make, or just command exists. This is not a substitute for a
+runnable command when one is available.
+
 ## Interpretation
 
 - 90-100: lean and actionable.

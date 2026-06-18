@@ -1,9 +1,13 @@
 name: context-proof
-version: 0.3.0
+version: 0.5.1
 triggers:
-  default_prompt: "Use $context-proof to audit this repository's AGENTS.md, CLAUDE.md, SKILL.md, and related agent context."
+  default_prompt: "Use $context-proof to classify, audit, and optimize this repository's AGENTS.md, CLAUDE.md, SKILL.md, and related agent context."
 commands:
   audit: "python scripts/contextproof.py audit . --pr-comment"
+  classify-context: "python scripts/contextproof.py classify-context SOURCE_PATH"
+  route-optimizer: "python scripts/contextproof.py route-optimizer SOURCE_PATH"
   compare-context: "python scripts/contextproof.py compare-context SOURCE_PATH CANDIDATE_PATH"
+  evaluate-gold: "python scripts/contextproof.py evaluate-gold SCENARIO_DIR CANDIDATE_PATH"
+  calibrate-scorer: "python scripts/contextproof.py calibrate-scorer examples/calibration/cases.jsonl"
   benchmark-optimizer: "python scripts/contextproof.py benchmark-optimizer examples/scenarios --jsonl-out .contextproof/optimizer-runs.jsonl --md-out .contextproof/optimizer-summary.md"
   quickstart: "python scripts/contextproof.py quickstart ."

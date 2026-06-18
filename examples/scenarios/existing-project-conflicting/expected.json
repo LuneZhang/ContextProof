@@ -1,6 +1,7 @@
 {
   "scenario_id": "existing-project-conflicting",
   "project_mode": "existing_project",
+  "expected_primary_scenario": "existing-project-agent-rules",
   "expected_issue_ids": [
     "conflicting-rule",
     "duplicate-rule",
@@ -8,5 +9,19 @@
   ],
   "preserve": [
     "npm test"
+  ],
+  "gold_path": "gold/AGENTS.gold.md",
+  "gold_primary_scenario": "existing-project-agent-rules",
+  "gold_must_preserve": [
+    "npm test",
+    "Keep changes scoped"
+  ],
+  "gold_must_remove_issue_ids": [
+    "conflicting-rule",
+    "duplicate-rule",
+    "vague-rule"
+  ],
+  "gold_allowed_tradeoffs": [
+    "Permission rules may be conditional when routine user-requested edits are already authorized."
   ]
 }

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 
-SCHEMA_VERSION = "0.3.0"
+SCHEMA_VERSION = "0.5.0"
 
 IGNORE_DIRS = {
     ".git",
@@ -91,6 +91,20 @@ GENERAL_DOC_PATTERNS = [
 ]
 
 COMMAND_RE = re.compile(r"`([^`\n]*(?:npm|pnpm|yarn|bun|pytest|ruff|mypy|cargo|go test|make|just)[^`\n]*)`")
+VALIDATION_GAP_PATTERNS = [
+    r"\bno validation command exists\b",
+    r"\bno (test|lint|build|typecheck) command exists\b",
+    r"\breport (that )?(validation|test|testing) gap\b",
+    r"\breport the reason\b.*\btests? cannot run\b",
+]
+NEGATION_PREFIX_RE = re.compile(
+    r"\b(do\s+not|don't|never|must\s+not|should\s+not|skip|avoid|without|no\s+need\s+to|not\s+required\s+to)\b",
+    re.I,
+)
+NEGATION_SUFFIX_RE = re.compile(
+    r"\b(can\s+be\s+skipped|may\s+be\s+skipped|should\s+be\s+skipped|is\s+optional|are\s+optional|not\s+required)\b",
+    re.I,
+)
 PATH_MARKER_RE = re.compile(
     r"(?<![\w/.-])"
     r"("
@@ -147,6 +161,60 @@ EVIDENCE_STATUS_TO_CONFIDENCE = {
     "supported_positive": "static_with_supported_benchmark",
     "supported_negative": "static_with_supported_benchmark",
 }
+
+SCENARIO_DEFINITIONS: dict[str, dict[str, Any]] = {
+    "new-project-init-summary": {
+        "name": "New-project /init summary",
+        "template": "new-project-init.md",
+        "doc_role": "bootstrap-agent-brief",
+        "description": "A saved /init-style repository brief that should become concise project onboarding context.",
+        "default_focus": ["repository-map", "validation", "acceptance-criteria", "token-reduction"],
+    },
+    "existing-project-agent-rules": {
+        "name": "Existing-project agent rules",
+        "template": "existing-project-rules.md",
+        "doc_role": "persistent-agent-instructions",
+        "description": "Repository-level rules for a coding agent working in an established codebase.",
+        "default_focus": ["executability", "validation", "rule-clarity", "token-reduction"],
+    },
+    "multi-agent-context-migration": {
+        "name": "Multi-agent context migration",
+        "template": "multi-agent-migration.md",
+        "doc_role": "agent-context-migration",
+        "description": "Overlapping context across multiple agent surfaces that should be consolidated or de-duplicated.",
+        "default_focus": ["deduplication", "conflict-resolution", "canonical-context", "preservation"],
+    },
+    "workflow-sop-context": {
+        "name": "Workflow or SOP context",
+        "template": "workflow-sop.md",
+        "doc_role": "repeatable-agent-workflow",
+        "description": "A repeatable workflow, runbook, review, release, or validation procedure for an agent.",
+        "default_focus": ["ordered-steps", "preconditions", "commands", "acceptance-criteria"],
+    },
+    "safety-sensitive-context": {
+        "name": "Safety-sensitive context",
+        "template": "safety-sensitive.md",
+        "doc_role": "safety-bound-agent-instructions",
+        "description": "Agent context that touches destructive commands, secrets, production data, deploys, or migrations.",
+        "default_focus": ["negative-constraints", "approval-gates", "safe-defaults", "validation"],
+    },
+    "token-heavy-context": {
+        "name": "Token-heavy context",
+        "template": "token-heavy.md",
+        "doc_role": "oversized-agent-context",
+        "description": "Long or repetitive agent context where the main risk is token waste and low information density.",
+        "default_focus": ["compression", "deduplication", "information-density", "preservation"],
+    },
+}
+
+SCENARIO_PRIORITY = [
+    "safety-sensitive-context",
+    "multi-agent-context-migration",
+    "new-project-init-summary",
+    "workflow-sop-context",
+    "token-heavy-context",
+    "existing-project-agent-rules",
+]
 
 
 class ContextProofInputError(Exception):
@@ -290,6 +358,14 @@ def estimate_tokens(text: str) -> int:
 
 def rel(path: Path, root: Path) -> str:
     return path.resolve().relative_to(root.resolve()).as_posix()
+
+
+def is_under_path(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
 
 
 def normalize_project_mode(value: str | None) -> str:
@@ -466,6 +542,10 @@ def discover_context_files(root: Path) -> list[tuple[Path, str]]:
     return sorted(files, key=lambda item: rel(item[0], root))
 
 
+def has_validation_gap_policy(text: str) -> bool:
+    return any(re.search(pattern, text, re.I | re.M) for pattern in VALIDATION_GAP_PATTERNS)
+
+
 def discover_commands(root: Path) -> list[Command]:
     commands: list[Command] = []
     package_json = root / "package.json"
@@ -526,6 +606,8 @@ def discover_commands(root: Path) -> list[Command]:
         relative = rel(path, root)
         for mentioned in COMMAND_RE.findall(text):
             commands.append(Command("context-command", mentioned.strip(), relative, "medium"))
+        if has_validation_gap_policy(text):
+            commands.append(Command("validation-gap", "report validation gap and manual checks", relative, "low"))
 
     seen: set[str] = set()
     unique: list[Command] = []
@@ -1027,6 +1109,17 @@ def write_outputs(payload: dict[str, Any], json_out: str | None, md_out: str | N
         target.write_text(render_markdown_report(payload), encoding="utf-8")
 
 
+def context_output_dir(source: Path) -> Path:
+    anchor = source if source.is_dir() else source.parent
+    try:
+        root = git_output(anchor, ["rev-parse", "--show-toplevel"]).strip()
+        if root:
+            return Path(root) / ".contextproof"
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        pass
+    return anchor / ".contextproof"
+
+
 def canonical_context_filename(path: Path) -> str:
     if path.name in CONTEXT_BASENAMES:
         return path.name
@@ -1071,6 +1164,26 @@ def extract_validation_commands(text: str) -> set[str]:
     return {item.strip() for item in COMMAND_RE.findall(text) if item.strip()}
 
 
+def text_negates_item(text: str, item: str) -> bool:
+    item = item.strip()
+    if not item or item not in text:
+        return False
+    escaped = re.escape(item)
+    item_pattern = rf"`?{escaped}`?"
+    for line in text.splitlines():
+        if item not in line:
+            continue
+        negated_before = rf"{NEGATION_PREFIX_RE.pattern}[^.\n;:]{{0,90}}{item_pattern}"
+        negated_after = rf"{item_pattern}[^.\n;:]{{0,90}}{NEGATION_SUFFIX_RE.pattern}"
+        if re.search(negated_before, line, re.I) or re.search(negated_after, line, re.I):
+            return True
+    return False
+
+
+def negated_items(text: str, items: Iterable[str]) -> list[str]:
+    return sorted({item for item in items if text_negates_item(text, str(item))})
+
+
 def extract_path_markers(text: str) -> set[str]:
     markers: set[str] = set()
     for match in PATH_MARKER_RE.findall(text):
@@ -1098,6 +1211,363 @@ def compact_report_summary(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def count_regex_matches(text: str, patterns: list[str]) -> int:
+    total = 0
+    for pattern in patterns:
+        total += len(re.findall(pattern, text, re.I | re.M))
+    return total
+
+
+def add_signal(
+    scores: dict[str, int],
+    evidence: dict[str, list[str]],
+    scenario_id: str,
+    points: int,
+    reason: str,
+) -> None:
+    scores[scenario_id] = scores.get(scenario_id, 0) + points
+    evidence.setdefault(scenario_id, []).append(reason)
+
+
+def classify_context_scenario(
+    path: Path,
+    deterministic: bool = False,
+    project_mode: str = "existing_project",
+) -> dict[str, Any]:
+    path = path.resolve()
+    if not path.exists():
+        raise ContextProofInputError(f"Context path does not exist: {path}")
+    normalized_project_mode = normalize_project_mode(project_mode)
+    text = context_input_text(path)
+    lower = text.lower()
+    report = audit_context_input(path, deterministic=deterministic, project_mode=normalized_project_mode)
+    issue_ids = {str(item["id"]) for item in report.get("findings", [])}
+    context_files = report.get("context_files", [])
+    context_file_count = int(report.get("summary", {}).get("context_file_count", 0))
+    total_tokens = int(report.get("summary", {}).get("total_context_tokens", estimate_tokens(text)))
+    command_count = int(report.get("summary", {}).get("command_count", 0))
+
+    scores = {scenario_id: 0 for scenario_id in SCENARIO_DEFINITIONS}
+    evidence: dict[str, list[str]] = {scenario_id: [] for scenario_id in SCENARIO_DEFINITIONS}
+
+    add_signal(scores, evidence, "existing-project-agent-rules", 1, "baseline route for persistent agent instructions")
+    if normalized_project_mode == "existing_project":
+        add_signal(scores, evidence, "existing-project-agent-rules", 2, "project mode is existing_project")
+    if context_file_count:
+        add_signal(scores, evidence, "existing-project-agent-rules", 1, f"{context_file_count} agent context file(s) detected")
+
+    new_project_hits = count_regex_matches(
+        lower,
+        [
+            r"/init\b",
+            r"\binitial (project|repository) brief\b",
+            r"\bnew project\b",
+            r"\bbootstrap\b",
+            r"\bproject overview\b",
+            r"\brepository overview\b",
+            r"\bscaffold\b",
+        ],
+    )
+    if normalized_project_mode == "new_project":
+        add_signal(scores, evidence, "new-project-init-summary", 4, "project mode is new_project")
+    if new_project_hits:
+        add_signal(scores, evidence, "new-project-init-summary", min(4, new_project_hits), "init or repository-overview language detected")
+    if normalized_project_mode == "new_project" and context_file_count <= 1:
+        add_signal(scores, evidence, "new-project-init-summary", 1, "single-file new-project context")
+
+    agent_surface_hits = count_regex_matches(
+        lower,
+        [
+            r"\bagents\.md\b",
+            r"\bclaude\.md\b",
+            r"\bgemini\.md\b",
+            r"\.cursor/rules",
+            r"\.windsurfrules",
+            r"\.clinerules",
+            r"\bcopilot-instructions\.md\b",
+            r"\bopencode\b",
+        ],
+    )
+    if normalized_project_mode == "migration_project":
+        add_signal(scores, evidence, "multi-agent-context-migration", 4, "project mode is migration_project")
+    if context_file_count >= 2:
+        add_signal(scores, evidence, "multi-agent-context-migration", 3, "multiple agent context files detected")
+    if agent_surface_hits >= 3:
+        add_signal(scores, evidence, "multi-agent-context-migration", 2, "multiple agent surfaces are referenced")
+    if (context_file_count >= 2 or normalized_project_mode == "migration_project" or agent_surface_hits >= 3) and {
+        "duplicate-rule",
+        "conflicting-rule",
+    } & issue_ids:
+        add_signal(scores, evidence, "multi-agent-context-migration", 2, "duplicate or conflicting rules detected")
+
+    workflow_hits = count_regex_matches(
+        lower,
+        [
+            r"\bworkflow\b",
+            r"\bsop\b",
+            r"\brunbook\b",
+            r"\brelease\b",
+            r"\bdeploy\b",
+            r"\breview checklist\b",
+            r"\bbefore (merging|release|deploying)\b",
+            r"\bafter (editing|changing|release)\b",
+            r"^#+\s*(workflow|release|deploy|review|validation|runbook)\b",
+        ],
+    )
+    if workflow_hits:
+        add_signal(scores, evidence, "workflow-sop-context", min(5, workflow_hits), "workflow, runbook, release, deploy, or review language detected")
+    if command_count >= 2 and workflow_hits:
+        add_signal(scores, evidence, "workflow-sop-context", 1, "multiple commands appear in workflow-like context")
+
+    safety_hits = count_regex_matches(
+        lower,
+        [
+            r"\bproduction\b",
+            r"\bprod\b",
+            r"\bdatabase\b",
+            r"\bdb\b",
+            r"\bmigration\b",
+            r"\bsecrets?\b",
+            r"\bcredentials?\b",
+            r"\bdeploy\b",
+            r"\bdelete\b",
+            r"\bdrop\b",
+            r"\bdestroy\b",
+            r"\brm -rf\b",
+            r"\bsudo\b",
+            r"\bchmod 777\b",
+            r"\b\.env\b",
+        ],
+    )
+    if "risky-shell" in issue_ids:
+        add_signal(scores, evidence, "safety-sensitive-context", 5, "risky shell or prompt-injection-like pattern detected")
+    if safety_hits:
+        add_signal(scores, evidence, "safety-sensitive-context", min(5, safety_hits), "production, data, secret, deploy, or destructive-operation language detected")
+
+    if total_tokens >= 1200:
+        add_signal(scores, evidence, "token-heavy-context", 3, f"context is large for persistent prompt use ({total_tokens} estimated tokens)")
+    if total_tokens >= 2000:
+        add_signal(scores, evidence, "token-heavy-context", 2, "context is very large")
+    if {"large-context-file", "large-context-set"} & issue_ids:
+        add_signal(scores, evidence, "token-heavy-context", 3, "large context finding detected")
+    if {"vague-rule", "overbroad-context"} <= issue_ids and "duplicate-rule" in issue_ids:
+        add_signal(scores, evidence, "token-heavy-context", 3, "repeated low-density context rules detected")
+    if "misplaced-general-docs" in issue_ids:
+        add_signal(scores, evidence, "token-heavy-context", 5, "ordinary product or planning documentation is mixed into agent context")
+    monorepo_hits = count_regex_matches(
+        lower,
+        [
+            r"\bmonorepo\b",
+            r"\bworkspace\b",
+            r"\bapps/",
+            r"\bservices/",
+            r"\bpackages/",
+            r"\brepeat",
+        ],
+    )
+    if monorepo_hits >= 4 and "duplicate-rule" in issue_ids:
+        add_signal(scores, evidence, "token-heavy-context", 4, "repetitive monorepo map detected")
+    if {"duplicate-rule", "vague-rule", "overbroad-context", "misplaced-general-docs"} & issue_ids:
+        add_signal(scores, evidence, "token-heavy-context", 1, "low-density context findings detected")
+
+    primary = max(
+        SCENARIO_DEFINITIONS,
+        key=lambda scenario_id: (scores[scenario_id], -SCENARIO_PRIORITY.index(scenario_id)),
+    )
+    if scores[primary] <= 0:
+        primary = "existing-project-agent-rules"
+    secondary = [
+        scenario_id
+        for scenario_id in SCENARIO_PRIORITY
+        if scenario_id != primary and scores.get(scenario_id, 0) >= 2
+    ][:4]
+    sorted_scores = sorted(scores.values(), reverse=True)
+    score_gap = sorted_scores[0] - (sorted_scores[1] if len(sorted_scores) > 1 else 0)
+    confidence = "high" if scores[primary] >= 5 and score_gap >= 2 else "medium" if scores[primary] >= 3 else "low"
+
+    focus = list(SCENARIO_DEFINITIONS[primary]["default_focus"])
+    focus_by_issue = {
+        "missing-test-command": "validation",
+        "vague-rule": "executability",
+        "overbroad-context": "task-scoped-discovery",
+        "duplicate-rule": "deduplication",
+        "conflicting-rule": "conflict-resolution",
+        "risky-shell": "safety",
+        "misplaced-general-docs": "context-boundary",
+        "large-context-file": "token-reduction",
+        "large-context-set": "token-reduction",
+        "overconstrained-rules": "negative-constraint-pruning",
+    }
+    for issue_id in sorted(issue_ids):
+        mapped = focus_by_issue.get(issue_id)
+        if mapped and mapped not in focus:
+            focus.append(mapped)
+    for scenario_id in secondary:
+        for item in SCENARIO_DEFINITIONS[scenario_id]["default_focus"][:2]:
+            if item not in focus:
+                focus.append(item)
+
+    critical_high = severity_count(report, {"critical", "high"})
+    if primary == "safety-sensitive-context" or "risky-shell" in issue_ids:
+        risk_level = "high"
+    elif critical_high or {"conflicting-rule", "missing-test-command"} & issue_ids:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
+
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    template = SCENARIO_DEFINITIONS[primary]
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "classification_type": "agent_context_scenario",
+        "source_path": str(path),
+        "project_mode": normalized_project_mode,
+        "primary_scenario": primary,
+        "primary_scenario_name": template["name"],
+        "secondary_scenarios": secondary,
+        "doc_role": template["doc_role"],
+        "optimization_focus": focus,
+        "risk_level": risk_level,
+        "confidence": confidence,
+        "selected_template": {
+            "id": primary,
+            "name": template["name"],
+            "reference_path": f"references/templates/{template['template']}",
+            "description": template["description"],
+        },
+        "scenario_scores": {
+            scenario_id: {
+                "score": scores[scenario_id],
+                "evidence": evidence.get(scenario_id, []),
+            }
+            for scenario_id in SCENARIO_PRIORITY
+        },
+        "audit_summary": compact_report_summary(report),
+    }
+
+
+def render_classification_markdown(classification: dict[str, Any]) -> str:
+    lines = [
+        "# ContextProof Context Classification",
+        "",
+        f"Source: `{classification['source_path']}`",
+        f"Primary scenario: `{classification['primary_scenario']}`",
+        f"Template: `{classification['selected_template']['reference_path']}`",
+        f"Doc role: `{classification['doc_role']}`",
+        f"Risk level: `{classification['risk_level']}`",
+        f"Confidence: `{classification['confidence']}`",
+        "",
+        "## Optimization Focus",
+        "",
+    ]
+    for item in classification["optimization_focus"]:
+        lines.append(f"- {item}")
+    lines.extend(["", "## Secondary Scenarios", ""])
+    if classification["secondary_scenarios"]:
+        for item in classification["secondary_scenarios"]:
+            lines.append(f"- `{item}`")
+    else:
+        lines.append("- None.")
+    lines.extend(["", "## Scenario Evidence", ""])
+    for scenario_id, item in classification["scenario_scores"].items():
+        if item["score"] <= 0:
+            continue
+        lines.append(f"### {scenario_id}")
+        lines.append("")
+        lines.append(f"- Score: {item['score']}")
+        for reason in item["evidence"]:
+            lines.append(f"- {reason}")
+        lines.append("")
+    lines.extend(
+        [
+            "## Audit Summary",
+            "",
+            f"- Static score: {classification['audit_summary']['score']} / 100",
+            f"- Estimated tokens: {classification['audit_summary']['total_context_tokens']}",
+            f"- Critical/high findings: {classification['audit_summary']['critical_high_finding_count']}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
+def candidate_output_hint(path: Path) -> str:
+    if path.is_file():
+        stem = path.stem or "AGENTS"
+        suffix = path.suffix if path.suffix in {".md", ".mdc", ".txt"} else ".md"
+        return f".contextproof/candidates/{stem}.contextproof{suffix}"
+    return ".contextproof/candidates/AGENTS.contextproof.md"
+
+
+def build_optimizer_route(
+    path: Path,
+    deterministic: bool = False,
+    project_mode: str = "existing_project",
+) -> dict[str, Any]:
+    classification = classify_context_scenario(path, deterministic=deterministic, project_mode=project_mode)
+    source = Path(classification["source_path"])
+    candidate_hint = candidate_output_hint(source)
+    template = classification["selected_template"]
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    instruction = render_optimizer_instruction(classification, candidate_hint)
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "route_type": "optimizer_template_route",
+        "source_path": classification["source_path"],
+        "candidate_output_hint": candidate_hint,
+        "selected_template": template,
+        "classification": classification,
+        "instruction": instruction,
+    }
+
+
+def render_optimizer_instruction(classification: dict[str, Any], candidate_hint: str) -> str:
+    template = classification["selected_template"]
+    focus = ", ".join(classification["optimization_focus"])
+    secondary = ", ".join(classification["secondary_scenarios"]) or "none"
+    source_path = classification["source_path"]
+    return "\n".join(
+        [
+            "# ContextProof Optimizer Route",
+            "",
+            "Use this instruction as the scenario-specific prompt for the coding agent that will draft the optimized context candidate.",
+            "",
+            "## Route",
+            "",
+            f"- Source: `{source_path}`",
+            f"- Primary scenario: `{classification['primary_scenario']}`",
+            f"- Secondary scenarios: {secondary}",
+            f"- Template reference: `{template['reference_path']}`",
+            f"- Candidate path: `{candidate_hint}`",
+            f"- Risk level: `{classification['risk_level']}`",
+            f"- Optimization focus: {focus}",
+            "",
+            "## Agent Task",
+            "",
+            f"Read `{template['reference_path']}` and the ContextProof audit report before editing.",
+            f"Draft a safer, shorter, more executable candidate for `{source_path}` at `{candidate_hint}`.",
+            "Preserve explicit validation commands, repository paths, package names, architecture facts, and active safety constraints.",
+            "Remove generic quality advice, duplicated rules, stale planning prose, and instructions that cannot be verified.",
+            "Do not overwrite source context files.",
+            "",
+            "After writing the candidate, run:",
+            "",
+            "```bash",
+            f"contextproof compare-context \"{source_path}\" \"{candidate_hint}\"",
+            "```",
+            "",
+            "Report the candidate path, selected template, score delta, token delta, preserved commands, unresolved risks, and regression flags.",
+            "",
+        ]
+    )
+
+
+def render_optimizer_route_markdown(route: dict[str, Any]) -> str:
+    return route["instruction"]
+
+
 def compare_contexts(
     source_path: Path,
     candidate_path: Path,
@@ -1121,6 +1591,7 @@ def compare_contexts(
     source_paths = extract_path_markers(source_text)
     candidate_paths = extract_path_markers(candidate_text)
     removed_commands = sorted(source_commands - candidate_commands)
+    negated_commands = negated_items(candidate_text, source_commands & candidate_commands)
     removed_paths = sorted(source_paths - candidate_paths)
 
     source_score = int(source_report["static_context_score"]["total"])
@@ -1142,6 +1613,8 @@ def compare_contexts(
         regression_flags.append("dropped-all-validation-commands")
     elif removed_commands:
         regression_flags.append("removed-some-validation-commands")
+    if negated_commands:
+        regression_flags.append("negated-validation-command")
     if source_paths and len(removed_paths) == len(source_paths):
         regression_flags.append("dropped-all-path-markers")
     elif source_paths and len(removed_paths) / max(1, len(source_paths)) > 0.5:
@@ -1186,6 +1659,7 @@ def compare_contexts(
             "source_validation_commands": sorted(source_commands),
             "candidate_validation_commands": sorted(candidate_commands),
             "removed_validation_commands": removed_commands,
+            "negated_validation_commands": negated_commands,
             "source_path_marker_count": len(source_paths),
             "candidate_path_marker_count": len(candidate_paths),
             "removed_path_markers": removed_paths[:30],
@@ -1235,6 +1709,11 @@ def render_candidate_report(report: dict[str, Any]) -> str:
             lines.append(f"- `{item}`")
     else:
         lines.append("- No explicit validation commands were removed.")
+    if preservation.get("negated_validation_commands"):
+        lines.append("")
+        lines.append("Negated validation commands:")
+        for item in preservation["negated_validation_commands"]:
+            lines.append(f"- `{item}`")
     if preservation["removed_path_markers"]:
         lines.append("")
         lines.append("Removed path markers requiring review:")
@@ -1257,6 +1736,460 @@ def render_candidate_report(report: dict[str, Any]) -> str:
     else:
         lines.append("- None.")
     lines.extend(["", "## Recommendation", "", report["recommendation"], ""])
+    return "\n".join(lines)
+
+
+def resolve_gold_path(scenario_dir: Path, expected: dict[str, Any]) -> Path:
+    raw = str(expected.get("gold_path") or "gold/AGENTS.gold.md")
+    return (scenario_dir / raw).resolve()
+
+
+def required_gold_preservation(expected: dict[str, Any]) -> list[str]:
+    values = expected.get("gold_must_preserve") or expected.get("preserve") or []
+    return [str(item) for item in values if str(item).strip()]
+
+
+def is_validation_like_preservation(item: str) -> bool:
+    return bool(re.search(r"\b(npm|pnpm|yarn|bun|pytest|ruff|mypy|cargo|go test|make|just)\b", item, re.I))
+
+
+def issue_ids_from_summary(summary: dict[str, Any]) -> set[str]:
+    return {str(item.get("id")) for item in summary.get("findings", []) if item.get("id")}
+
+
+def high_finding_count_from_summary(summary: dict[str, Any]) -> int:
+    return sum(1 for item in summary.get("findings", []) if item.get("severity") in {"critical", "high"})
+
+
+def evaluate_gold_candidate(
+    scenario_dir: Path,
+    candidate_path: Path,
+    deterministic: bool = False,
+) -> dict[str, Any]:
+    scenario_dir = scenario_dir.resolve()
+    if not scenario_dir.exists() or not scenario_dir.is_dir():
+        raise ContextProofInputError(f"Scenario directory does not exist: {scenario_dir}")
+    expected = load_scenario_expected(scenario_dir)
+    source = scenario_dir / "source"
+    if not source.exists():
+        raise ContextProofInputError(f"Scenario source directory does not exist: {source}")
+    candidate_path = candidate_path.resolve()
+    if not candidate_path.exists():
+        raise ContextProofInputError(f"Candidate path does not exist: {candidate_path}")
+    gold_path = resolve_gold_path(scenario_dir, expected)
+    if not gold_path.exists():
+        raise ContextProofInputError(f"Gold candidate does not exist: {gold_path}")
+
+    project_mode = normalize_project_mode(str(expected.get("project_mode") or "existing_project"))
+    source_candidate = compare_contexts(source, candidate_path, deterministic=deterministic, project_mode=project_mode)
+    source_gold = compare_contexts(source, gold_path, deterministic=deterministic, project_mode=project_mode)
+    gold_candidate = compare_contexts(gold_path, candidate_path, deterministic=deterministic, project_mode=project_mode)
+    classification = classify_context_scenario(source, deterministic=deterministic, project_mode=project_mode)
+
+    candidate_text = context_input_text(candidate_path)
+    gold_text = context_input_text(gold_path)
+    required_preserve = required_gold_preservation(expected)
+    missing_preservation = [item for item in required_preserve if item not in candidate_text]
+    negated_preservation = [
+        item
+        for item in required_preserve
+        if item in candidate_text and is_validation_like_preservation(item) and text_negates_item(candidate_text, item)
+    ]
+    missing_gold_preservation = [item for item in required_preserve if item not in gold_text]
+
+    expected_removed = {str(item) for item in expected.get("gold_must_remove_issue_ids", [])}
+    candidate_issue_ids = issue_ids_from_summary(source_candidate["candidate"])
+    gold_issue_ids = issue_ids_from_summary(source_gold["candidate"])
+    unresolved_expected_issues = sorted(expected_removed & candidate_issue_ids)
+    extra_candidate_findings_vs_gold = sorted(candidate_issue_ids - gold_issue_ids)
+
+    source_candidate_flags = set(source_candidate["regression_flags"])
+    gold_candidate_flags = set(gold_candidate["regression_flags"])
+    candidate_critical_high = high_finding_count_from_summary(source_candidate["candidate"])
+    source_critical_high = high_finding_count_from_summary(source_candidate["source"])
+    unsafe_regression_count = 0
+    if "safety-score-decreased" in source_candidate_flags:
+        unsafe_regression_count += 1
+    if "risky-shell" in candidate_issue_ids:
+        unsafe_regression_count += 1
+
+    overcompression_flags: list[str] = []
+    for flag in ["dropped-all-path-markers", "dropped-most-path-markers"]:
+        if flag in source_candidate_flags or flag in gold_candidate_flags:
+            overcompression_flags.append(flag)
+    candidate_tokens = int(source_candidate["candidate"]["total_context_tokens"])
+    gold_tokens = int(source_gold["candidate"]["total_context_tokens"])
+    if gold_tokens and candidate_tokens < max(5, math.floor(gold_tokens * 0.45)):
+        overcompression_flags.append("candidate-much-shorter-than-gold")
+    overcompression_flags = sorted(set(overcompression_flags))
+
+    alignment_score = 100
+    alignment_score -= 25 * (len(missing_preservation) + len(negated_preservation))
+    alignment_score -= 20 * unsafe_regression_count
+    alignment_score -= 15 * len(overcompression_flags)
+    alignment_score -= 10 * len(unresolved_expected_issues)
+    alignment_score -= 5 * len(extra_candidate_findings_vs_gold)
+    if int(source_candidate["deltas"]["score_delta"]) < 0:
+        alignment_score -= 20
+    if int(source_candidate["deltas"]["critical_high_finding_delta"]) > 0:
+        alignment_score -= 20
+    alignment_score = max(0, min(100, alignment_score))
+
+    if unsafe_regression_count:
+        verdict = "unsafe_regression"
+    elif missing_preservation or negated_preservation or missing_gold_preservation:
+        verdict = "missing_required_preservation"
+    elif overcompression_flags:
+        verdict = "overcompressed"
+    elif source_candidate["verdict"] == "regression" or int(source_candidate["deltas"]["score_delta"]) < 0:
+        verdict = "not_improved"
+    elif alignment_score >= 90 and not unresolved_expected_issues and candidate_critical_high <= source_critical_high:
+        verdict = "gold_aligned"
+    elif alignment_score >= 70:
+        verdict = "partially_aligned"
+    else:
+        verdict = "not_improved"
+
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "evaluation_type": "gold_candidate",
+        "scenario_id": str(expected.get("scenario_id") or scenario_dir.name),
+        "scenario_dir": str(scenario_dir),
+        "project_mode": project_mode,
+        "source_path": str(source.resolve()),
+        "candidate_path": str(candidate_path),
+        "gold_path": str(gold_path),
+        "verdict": verdict,
+        "gold_alignment_score": alignment_score,
+        "primary_scenario": classification["primary_scenario"],
+        "expected_primary_scenario": expected.get("expected_primary_scenario"),
+        "gold_primary_scenario": expected.get("gold_primary_scenario"),
+        "selected_template": classification["selected_template"]["reference_path"],
+        "missing_gold_preservation": missing_preservation,
+        "negated_gold_preservation": negated_preservation,
+        "gold_reference_missing_preservation": missing_gold_preservation,
+        "unresolved_expected_issue_ids": unresolved_expected_issues,
+        "extra_candidate_findings_vs_gold": extra_candidate_findings_vs_gold,
+        "overcompression_flags": overcompression_flags,
+        "unsafe_regression_count": unsafe_regression_count,
+        "critical_high_introduced_count": max(0, candidate_critical_high - source_critical_high),
+        "source_candidate": {
+            "verdict": source_candidate["verdict"],
+            "score_delta": source_candidate["deltas"]["score_delta"],
+            "token_delta": source_candidate["deltas"]["token_delta"],
+            "critical_high_finding_delta": source_candidate["deltas"]["critical_high_finding_delta"],
+            "regression_flags": source_candidate["regression_flags"],
+        },
+        "source_gold": {
+            "verdict": source_gold["verdict"],
+            "score_delta": source_gold["deltas"]["score_delta"],
+            "token_delta": source_gold["deltas"]["token_delta"],
+            "critical_high_finding_delta": source_gold["deltas"]["critical_high_finding_delta"],
+            "regression_flags": source_gold["regression_flags"],
+        },
+        "gold_candidate": {
+            "verdict": gold_candidate["verdict"],
+            "score_delta": gold_candidate["deltas"]["score_delta"],
+            "token_delta": gold_candidate["deltas"]["token_delta"],
+            "critical_high_finding_delta": gold_candidate["deltas"]["critical_high_finding_delta"],
+            "regression_flags": gold_candidate["regression_flags"],
+        },
+    }
+
+
+def render_gold_evaluation_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# ContextProof Gold Evaluation",
+        "",
+        f"Scenario: `{report['scenario_id']}`",
+        f"Verdict: `{report['verdict']}`",
+        f"Gold alignment score: {report['gold_alignment_score']} / 100",
+        f"Source: `{report['source_path']}`",
+        f"Candidate: `{report['candidate_path']}`",
+        f"Gold: `{report['gold_path']}`",
+        f"Selected template: `{report['selected_template']}`",
+        "",
+        "## Source vs Candidate",
+        "",
+        f"- Verdict: `{report['source_candidate']['verdict']}`",
+        f"- Score delta: {report['source_candidate']['score_delta']:+d}",
+        f"- Token delta: {report['source_candidate']['token_delta']:+d}",
+        f"- Critical/high finding delta: {report['source_candidate']['critical_high_finding_delta']:+d}",
+        "",
+        "## Gold Checks",
+        "",
+        f"- Missing preservation count: {len(report['missing_gold_preservation'])}",
+        f"- Negated preservation count: {len(report.get('negated_gold_preservation', []))}",
+        f"- Unsafe regression count: {report['unsafe_regression_count']}",
+        f"- Critical/high introduced findings: {report['critical_high_introduced_count']}",
+        f"- Overcompression flags: {len(report['overcompression_flags'])}",
+        "",
+    ]
+    if report["missing_gold_preservation"]:
+        lines.append("Missing required preservation:")
+        for item in report["missing_gold_preservation"]:
+            lines.append(f"- `{item}`")
+        lines.append("")
+    if report.get("negated_gold_preservation"):
+        lines.append("Negated required preservation:")
+        for item in report["negated_gold_preservation"]:
+            lines.append(f"- `{item}`")
+        lines.append("")
+    if report["unresolved_expected_issue_ids"]:
+        lines.append("Unresolved expected issue ids:")
+        for item in report["unresolved_expected_issue_ids"]:
+            lines.append(f"- `{item}`")
+        lines.append("")
+    if report["extra_candidate_findings_vs_gold"]:
+        lines.append("Extra candidate findings compared with gold:")
+        for item in report["extra_candidate_findings_vs_gold"]:
+            lines.append(f"- `{item}`")
+        lines.append("")
+    if report["overcompression_flags"]:
+        lines.append("Overcompression flags:")
+        for item in report["overcompression_flags"]:
+            lines.append(f"- `{item}`")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def score_bucket(score: int) -> str:
+    if score >= 90:
+        return "lean_actionable"
+    if score >= 75:
+        return "usable_cleanup_needed"
+    if score >= 60:
+        return "risky_context"
+    return "blocked_context"
+
+
+def load_calibration_cases(path: Path) -> list[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        raise ContextProofInputError(f"Calibration JSONL does not exist: {path}")
+    rows: list[dict[str, Any]] = []
+    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ContextProofInputError(f"Invalid calibration JSON on line {index}: {exc}") from exc
+        if not isinstance(row, dict):
+            raise ContextProofInputError(f"Calibration row {index} must be an object.")
+        rows.append(row)
+    if not rows:
+        raise ContextProofInputError(f"Calibration JSONL has no cases: {path}")
+    return rows
+
+
+def audit_calibration_case(row: dict[str, Any], base_dir: Path, deterministic: bool) -> dict[str, Any]:
+    project_mode = normalize_project_mode(str(row.get("project_mode") or "existing_project"))
+    if row.get("fixture_path"):
+        target = (base_dir / str(row["fixture_path"])).resolve()
+        return audit_context_input(target, deterministic=deterministic, project_mode=project_mode)
+    if row.get("context") is not None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "AGENTS.md"
+            path.write_text(str(row["context"]), encoding="utf-8")
+            return audit_context_input(path, deterministic=deterministic, project_mode=project_mode)
+    raise ContextProofInputError(f"Calibration case {row.get('case_id', '<unknown>')} must provide fixture_path or context.")
+
+
+def calibrate_scorer(path: Path, deterministic: bool = False) -> dict[str, Any]:
+    path = path.resolve()
+    rows = load_calibration_cases(path)
+    cases: list[dict[str, Any]] = []
+    total_expected = 0
+    total_missing = 0
+    total_unexpected = 0
+    severity_checked = 0
+    severity_mismatches = 0
+    dimension_checked = 0
+    dimension_mismatches = 0
+    score_bucket_checked = 0
+    score_bucket_mismatches = 0
+
+    for row in rows:
+        report = audit_calibration_case(row, path.parent, deterministic)
+        findings = report.get("findings", [])
+        findings_by_id: dict[str, list[dict[str, Any]]] = {}
+        for finding in findings:
+            findings_by_id.setdefault(str(finding.get("id")), []).append(finding)
+        actual_issue_ids = set(findings_by_id)
+        expected_issue_ids = {str(item) for item in row.get("expected_issue_ids", [])}
+        total_expected += len(expected_issue_ids)
+        missing = sorted(expected_issue_ids - actual_issue_ids)
+        unexpected = sorted(actual_issue_ids - expected_issue_ids)
+        total_missing += len(missing)
+        total_unexpected += len(unexpected)
+
+        expected_severity = {str(key): str(value) for key, value in dict(row.get("expected_severity", {})).items()}
+        severity_mismatch_items: list[dict[str, str]] = []
+        for issue_id, severity in expected_severity.items():
+            if issue_id not in findings_by_id:
+                continue
+            severity_checked += 1
+            actual_severities = {str(item.get("severity")) for item in findings_by_id[issue_id]}
+            if severity not in actual_severities:
+                severity_mismatches += 1
+                severity_mismatch_items.append(
+                    {
+                        "issue_id": issue_id,
+                        "expected": severity,
+                        "actual": ", ".join(sorted(actual_severities)),
+                    }
+                )
+
+        expected_dimension = {str(key): str(value) for key, value in dict(row.get("expected_dimension", {})).items()}
+        dimension_mismatch_items: list[dict[str, str]] = []
+        for issue_id, dimension in expected_dimension.items():
+            if issue_id not in findings_by_id:
+                continue
+            dimension_checked += 1
+            actual_dimensions = {str(item.get("category")) for item in findings_by_id[issue_id]}
+            if dimension not in actual_dimensions:
+                dimension_mismatches += 1
+                dimension_mismatch_items.append(
+                    {
+                        "issue_id": issue_id,
+                        "expected": dimension,
+                        "actual": ", ".join(sorted(actual_dimensions)),
+                    }
+                )
+
+        total_score = int(report["static_context_score"]["total"])
+        actual_bucket = score_bucket(total_score)
+        expected_bucket = str(row.get("expected_score_bucket") or "")
+        score_bucket_match = None
+        if expected_bucket:
+            score_bucket_checked += 1
+            score_bucket_match = expected_bucket == actual_bucket
+            if not score_bucket_match:
+                score_bucket_mismatches += 1
+
+        cases.append(
+            {
+                "case_id": str(row.get("case_id") or len(cases) + 1),
+                "rationale": str(row.get("rationale") or ""),
+                "score": total_score,
+                "expected_score_bucket": expected_bucket or None,
+                "actual_score_bucket": actual_bucket,
+                "score_bucket_match": score_bucket_match,
+                "expected_issue_ids": sorted(expected_issue_ids),
+                "actual_issue_ids": sorted(actual_issue_ids),
+                "missing_expected_issue_ids": missing,
+                "unexpected_issue_ids": unexpected,
+                "severity_mismatches": severity_mismatch_items,
+                "dimension_mismatches": dimension_mismatch_items,
+            }
+        )
+
+    missing_rate = total_missing / total_expected if total_expected else 0.0
+    unexpected_rate = total_unexpected / total_expected if total_expected else 0.0
+    severity_mismatch_rate = severity_mismatches / severity_checked if severity_checked else 0.0
+    dimension_mismatch_rate = dimension_mismatches / dimension_checked if dimension_checked else 0.0
+    score_bucket_mismatch_rate = score_bucket_mismatches / score_bucket_checked if score_bucket_checked else 0.0
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "calibration_type": "scorer",
+        "source_path": str(path),
+        "case_count": len(cases),
+        "summary": {
+            "missing_expected_issue_rate": missing_rate,
+            "unexpected_issue_rate": unexpected_rate,
+            "severity_mismatch_rate": severity_mismatch_rate,
+            "dimension_mismatch_rate": dimension_mismatch_rate,
+            "score_bucket_mismatch_rate": score_bucket_mismatch_rate,
+            "total_expected_issue_count": total_expected,
+            "missing_expected_issue_count": total_missing,
+            "unexpected_issue_count": total_unexpected,
+            "severity_checked_count": severity_checked,
+            "severity_mismatch_count": severity_mismatches,
+            "dimension_checked_count": dimension_checked,
+            "dimension_mismatch_count": dimension_mismatches,
+            "score_bucket_checked_count": score_bucket_checked,
+            "score_bucket_mismatch_count": score_bucket_mismatches,
+        },
+        "cases": cases,
+    }
+
+
+def render_calibration_markdown(report: dict[str, Any]) -> str:
+    summary = report["summary"]
+    lines = [
+        "# ContextProof Scorer Calibration",
+        "",
+        f"Cases: {report['case_count']}",
+        f"Missing expected issue rate: {summary['missing_expected_issue_rate']:.2%}",
+        f"Unexpected issue rate: {summary['unexpected_issue_rate']:.2%}",
+        f"Severity mismatch rate: {summary['severity_mismatch_rate']:.2%}",
+        f"Dimension mismatch rate: {summary['dimension_mismatch_rate']:.2%}",
+        f"Score bucket mismatch rate: {summary['score_bucket_mismatch_rate']:.2%}",
+        "",
+        "## Failed Cases",
+        "",
+    ]
+    failed_cases = [
+        case
+        for case in report["cases"]
+        if case["missing_expected_issue_ids"]
+        or case["unexpected_issue_ids"]
+        or case["severity_mismatches"]
+        or case["dimension_mismatches"]
+        or case["score_bucket_match"] is False
+    ]
+    if failed_cases:
+        for case in failed_cases:
+            reasons = []
+            if case["missing_expected_issue_ids"]:
+                reasons.append("missing expected issues")
+            if case["unexpected_issue_ids"]:
+                reasons.append("unexpected issues")
+            if case["severity_mismatches"]:
+                reasons.append("severity mismatch")
+            if case["dimension_mismatches"]:
+                reasons.append("dimension mismatch")
+            if case["score_bucket_match"] is False:
+                reasons.append("score bucket mismatch")
+            lines.append(f"- `{case['case_id']}`: {', '.join(reasons)}")
+    else:
+        lines.append("- None.")
+    lines.extend(
+        [
+            "",
+            "## Cases",
+            "",
+        ]
+    )
+    for case in report["cases"]:
+        lines.append(f"### {case['case_id']}")
+        lines.append("")
+        lines.append(f"- Score: {case['score']} / 100")
+        lines.append(f"- Score bucket: `{case['actual_score_bucket']}`")
+        if case["expected_score_bucket"]:
+            lines.append(f"- Expected bucket: `{case['expected_score_bucket']}`")
+            lines.append(f"- Bucket match: `{case['score_bucket_match']}`")
+        if case["missing_expected_issue_ids"]:
+            lines.append(f"- Missing expected issues: {', '.join(f'`{item}`' for item in case['missing_expected_issue_ids'])}")
+        if case["unexpected_issue_ids"]:
+            lines.append(f"- Unexpected issues: {', '.join(f'`{item}`' for item in case['unexpected_issue_ids'])}")
+        if case["severity_mismatches"]:
+            lines.append(f"- Severity mismatches: {len(case['severity_mismatches'])}")
+        if case["dimension_mismatches"]:
+            lines.append(f"- Dimension mismatches: {len(case['dimension_mismatches'])}")
+        if not (
+            case["missing_expected_issue_ids"]
+            or case["unexpected_issue_ids"]
+            or case["severity_mismatches"]
+            or case["dimension_mismatches"]
+            or case["score_bucket_match"] is False
+        ):
+            lines.append("- Calibration checks passed.")
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -1316,23 +2249,54 @@ def build_optimizer_benchmark_rows(
         scenario_id = str(expected.get("scenario_id") or scenario_dir.name)
         project_mode = normalize_project_mode(str(expected.get("project_mode") or "existing_project"))
         preserve = [str(item) for item in expected.get("preserve", []) if str(item).strip()]
+        classification = classify_context_scenario(source, deterministic=deterministic, project_mode=project_mode)
+        expected_primary_scenario = str(expected.get("expected_primary_scenario") or "")
+        classification_match = (
+            None
+            if not expected_primary_scenario
+            else classification["primary_scenario"] == expected_primary_scenario
+        )
         for candidate in discover_candidate_inputs(scenario_dir):
             comparison = compare_contexts(source, candidate, deterministic=deterministic, project_mode=project_mode)
+            gold_evaluation: dict[str, Any] | None = None
+            gold_path = resolve_gold_path(scenario_dir, expected)
+            if gold_path.exists():
+                gold_evaluation = evaluate_gold_candidate(scenario_dir, candidate, deterministic=deterministic)
             candidate_text = context_input_text(candidate)
             missing_preservation = [item for item in preserve if item not in candidate_text]
             variant = infer_prompt_variant(candidate, scenario_dir, prompt_variant)
             regression_flags = list(comparison["regression_flags"])
             if missing_preservation:
                 regression_flags.append("missing-expected-preservation")
+            if gold_evaluation and gold_evaluation["verdict"] in {"unsafe_regression", "missing_required_preservation"}:
+                regression_flags.append(gold_evaluation["verdict"])
             score_delta = int(comparison["deltas"]["score_delta"])
             token_delta = int(comparison["deltas"]["token_delta"])
             critical_high_delta = int(comparison["deltas"]["critical_high_finding_delta"])
+            candidate_tokens = int(comparison["candidate"]["total_context_tokens"])
+            source_tokens = int(comparison["source"]["total_context_tokens"])
+            gold_tokens = (
+                source_tokens + int(gold_evaluation["source_gold"]["token_delta"])
+                if gold_evaluation
+                else source_tokens
+            )
+            gold_allows_token_growth = bool(
+                gold_evaluation
+                and token_delta > 0
+                and int(gold_evaluation["source_gold"]["token_delta"]) > 0
+                and gold_evaluation["verdict"] in {"gold_aligned", "partially_aligned"}
+                and candidate_tokens <= math.ceil(gold_tokens * 1.10)
+            )
             success = (
                 comparison["verdict"] == "improved"
                 and score_delta >= 0
-                and token_delta <= 0
+                and (token_delta <= 0 or gold_allows_token_growth)
                 and critical_high_delta <= 0
                 and not regression_flags
+                and (
+                    not gold_evaluation
+                    or gold_evaluation["verdict"] in {"gold_aligned", "partially_aligned"}
+                )
             )
             rows.append(
                 {
@@ -1340,6 +2304,11 @@ def build_optimizer_benchmark_rows(
                     "generated_at": generated_at,
                     "run_id": f"{scenario_id}:{variant}:{candidate.name}",
                     "scenario_id": scenario_id,
+                    "classified_primary_scenario": classification["primary_scenario"],
+                    "classified_secondary_scenarios": classification["secondary_scenarios"],
+                    "selected_template": classification["selected_template"]["reference_path"],
+                    "classification_confidence": classification["confidence"],
+                    "classification_match": classification_match,
                     "prompt_variant": variant,
                     "project_mode": project_mode,
                     "source_path": str(source.resolve()),
@@ -1348,6 +2317,7 @@ def build_optimizer_benchmark_rows(
                     "success": success,
                     "score_delta": score_delta,
                     "token_delta": token_delta,
+                    "gold_token_growth_allowed": gold_allows_token_growth,
                     "critical_high_finding_delta": critical_high_delta,
                     "resolved_finding_count": comparison["deltas"]["resolved_finding_count"],
                     "introduced_finding_count": comparison["deltas"]["introduced_finding_count"],
@@ -1357,10 +2327,30 @@ def build_optimizer_benchmark_rows(
                     "candidate_tokens": comparison["candidate"]["total_context_tokens"],
                     "regression_flags": regression_flags,
                     "removed_validation_commands": comparison["preservation"]["removed_validation_commands"],
+                    "negated_validation_commands": comparison["preservation"].get("negated_validation_commands", []),
                     "missing_expected_preservation": missing_preservation,
+                    "gold_path": str(gold_path) if gold_path.exists() else None,
+                    "gold_alignment_verdict": gold_evaluation["verdict"] if gold_evaluation else None,
+                    "gold_alignment_score": gold_evaluation["gold_alignment_score"] if gold_evaluation else None,
+                    "missing_gold_preservation": gold_evaluation["missing_gold_preservation"] if gold_evaluation else [],
+                    "negated_gold_preservation": gold_evaluation["negated_gold_preservation"] if gold_evaluation else [],
+                    "extra_candidate_findings_vs_gold": gold_evaluation["extra_candidate_findings_vs_gold"] if gold_evaluation else [],
+                    "overcompression_flags": gold_evaluation["overcompression_flags"] if gold_evaluation else [],
+                    "unsafe_regression_count": gold_evaluation["unsafe_regression_count"] if gold_evaluation else 0,
                 }
             )
     return rows
+
+
+def gold_alignment_rate(rows: list[dict[str, Any]]) -> float | None:
+    gold_rows = [row for row in rows if row.get("gold_alignment_verdict")]
+    if not gold_rows:
+        return None
+    aligned = [
+        1.0 if row.get("gold_alignment_verdict") in {"gold_aligned", "partially_aligned"} else 0.0
+        for row in gold_rows
+    ]
+    return mean_or_none(aligned)
 
 
 def summarize_optimizer_benchmark(rows: list[dict[str, Any]], prompt_variant: str) -> dict[str, Any]:
@@ -1376,10 +2366,32 @@ def summarize_optimizer_benchmark(rows: list[dict[str, Any]], prompt_variant: st
         variant_summaries[variant] = {
             "runs": len(items),
             "success_rate": mean_or_none(successes) or 0.0,
+            "gold_alignment_rate": gold_alignment_rate(items),
             "avg_score_delta": mean_or_none(score_deltas),
             "avg_token_delta": mean_or_none(token_deltas),
             "avg_critical_high_finding_delta": mean_or_none(critical_deltas),
             "regression_count": sum(1 for item in items if item.get("regression_flags")),
+            "unsafe_regression_count": sum(int(item.get("unsafe_regression_count") or 0) for item in items),
+            "overcompression_count": sum(1 for item in items if item.get("overcompression_flags")),
+            "missing_preservation_count": sum(1 for item in items if item.get("missing_gold_preservation")),
+        }
+    scenario_routes: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        scenario_routes.setdefault(str(row["classified_primary_scenario"]), []).append(row)
+    scenario_summaries: dict[str, dict[str, Any]] = {}
+    for scenario_id, items in sorted(scenario_routes.items()):
+        successes = [1.0 if item.get("success") else 0.0 for item in items]
+        matches = [item.get("classification_match") for item in items if item.get("classification_match") is not None]
+        scenario_summaries[scenario_id] = {
+            "runs": len(items),
+            "success_rate": mean_or_none(successes) or 0.0,
+            "gold_alignment_rate": gold_alignment_rate(items),
+            "classification_match_rate": mean_or_none([1.0 if item else 0.0 for item in matches]) if matches else None,
+            "templates": sorted({str(item["selected_template"]) for item in items}),
+            "regression_count": sum(1 for item in items if item.get("regression_flags")),
+            "unsafe_regression_count": sum(int(item.get("unsafe_regression_count") or 0) for item in items),
+            "overcompression_count": sum(1 for item in items if item.get("overcompression_flags")),
+            "missing_preservation_count": sum(1 for item in items if item.get("missing_gold_preservation")),
         }
     return {
         "schema_version": SCHEMA_VERSION,
@@ -1387,7 +2399,12 @@ def summarize_optimizer_benchmark(rows: list[dict[str, Any]], prompt_variant: st
         "default_prompt_variant": prompt_variant,
         "run_count": len(rows),
         "scenario_count": len({str(row["scenario_id"]) for row in rows}),
+        "gold_alignment_rate": gold_alignment_rate(rows),
+        "unsafe_regression_count": sum(int(item.get("unsafe_regression_count") or 0) for item in rows),
+        "overcompression_count": sum(1 for item in rows if item.get("overcompression_flags")),
+        "missing_preservation_count": sum(1 for item in rows if item.get("missing_gold_preservation")),
         "variants": variant_summaries,
+        "scenario_routes": scenario_summaries,
     }
 
 
@@ -1397,6 +2414,10 @@ def render_optimizer_benchmark_markdown(summary: dict[str, Any], rows: list[dict
         "",
         f"Runs: {summary['run_count']}",
         f"Scenarios: {summary['scenario_count']}",
+        f"Gold alignment rate: {summary['gold_alignment_rate']:.2%}" if summary["gold_alignment_rate"] is not None else "Gold alignment rate: n/a",
+        f"Unsafe regressions: {summary['unsafe_regression_count']}",
+        f"Overcompression count: {summary['overcompression_count']}",
+        f"Missing preservation count: {summary['missing_preservation_count']}",
         "",
         "## Variants",
         "",
@@ -1406,6 +2427,8 @@ def render_optimizer_benchmark_markdown(summary: dict[str, Any], rows: list[dict
         lines.append("")
         lines.append(f"- Runs: {item['runs']}")
         lines.append(f"- Success rate: {item['success_rate']:.2%}")
+        if item["gold_alignment_rate"] is not None:
+            lines.append(f"- Gold alignment rate: {item['gold_alignment_rate']:.2%}")
         if item["avg_score_delta"] is not None:
             lines.append(f"- Avg score delta: {item['avg_score_delta']:+.1f}")
         if item["avg_token_delta"] is not None:
@@ -1413,6 +2436,29 @@ def render_optimizer_benchmark_markdown(summary: dict[str, Any], rows: list[dict
         if item["avg_critical_high_finding_delta"] is not None:
             lines.append(f"- Avg critical/high finding delta: {item['avg_critical_high_finding_delta']:+.1f}")
         lines.append(f"- Regression count: {item['regression_count']}")
+        lines.append(f"- Unsafe regressions: {item['unsafe_regression_count']}")
+        lines.append(f"- Overcompression count: {item['overcompression_count']}")
+        lines.append(f"- Missing preservation count: {item['missing_preservation_count']}")
+        lines.append("")
+    lines.extend(["## Scenario Routes", ""])
+    if summary["scenario_routes"]:
+        for scenario_id, item in summary["scenario_routes"].items():
+            lines.append(f"### {scenario_id}")
+            lines.append("")
+            lines.append(f"- Runs: {item['runs']}")
+            lines.append(f"- Success rate: {item['success_rate']:.2%}")
+            if item["gold_alignment_rate"] is not None:
+                lines.append(f"- Gold alignment rate: {item['gold_alignment_rate']:.2%}")
+            if item["classification_match_rate"] is not None:
+                lines.append(f"- Classification match rate: {item['classification_match_rate']:.2%}")
+            lines.append(f"- Templates: {', '.join(f'`{template}`' for template in item['templates'])}")
+            lines.append(f"- Regression count: {item['regression_count']}")
+            lines.append(f"- Unsafe regressions: {item['unsafe_regression_count']}")
+            lines.append(f"- Overcompression count: {item['overcompression_count']}")
+            lines.append(f"- Missing preservation count: {item['missing_preservation_count']}")
+            lines.append("")
+    else:
+        lines.append("- No scenario route data.")
         lines.append("")
     lines.extend(["## Runs", ""])
     if not rows:
@@ -1420,6 +2466,13 @@ def render_optimizer_benchmark_markdown(summary: dict[str, Any], rows: list[dict
     for row in rows:
         lines.append(f"### {row['scenario_id']} / {row['prompt_variant']}")
         lines.append("")
+        lines.append(f"- Classified scenario: `{row['classified_primary_scenario']}`")
+        lines.append(f"- Template: `{row['selected_template']}`")
+        if row["classification_match"] is not None:
+            lines.append(f"- Classification match: `{row['classification_match']}`")
+        if row.get("gold_alignment_verdict"):
+            lines.append(f"- Gold verdict: `{row['gold_alignment_verdict']}`")
+            lines.append(f"- Gold alignment score: {row['gold_alignment_score']}")
         lines.append(f"- Verdict: `{row['verdict']}`")
         lines.append(f"- Success: `{row['success']}`")
         lines.append(f"- Score delta: {row['score_delta']:+d}")
@@ -1781,7 +2834,18 @@ def command_minimize(args: argparse.Namespace) -> int:
     report = audit_repo(root, deterministic=args.deterministic, project_mode=args.project_mode)
     candidate = build_minimal_agents_md(report)
     if args.output:
-        Path(args.output).write_text(candidate, encoding="utf-8")
+        target = Path(args.output)
+        if not target.is_absolute():
+            target = Path.cwd() / target
+        target = target.resolve()
+        output_root = root / ".contextproof"
+        if not is_under_path(target, output_root):
+            raise ContextProofInputError(
+                "minimize --output must write under the target repository's .contextproof/ directory. "
+                "Use .contextproof/context.min.md or run without --output to print to stdout."
+            )
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(candidate, encoding="utf-8")
     else:
         print(candidate)
     return 0
@@ -1843,7 +2907,7 @@ def command_compare_context(args: argparse.Namespace) -> int:
         deterministic=args.deterministic,
         project_mode=args.project_mode,
     )
-    output_dir = Path(args.output_dir) if args.output_dir else Path.cwd() / ".contextproof"
+    output_dir = Path(args.output_dir) if args.output_dir else context_output_dir(source.resolve())
     output_dir.mkdir(parents=True, exist_ok=True)
     json_out = Path(args.json_out) if args.json_out else output_dir / "candidate-report.json"
     md_out = Path(args.md_out) if args.md_out else output_dir / "candidate-report.md"
@@ -1851,6 +2915,89 @@ def command_compare_context(args: argparse.Namespace) -> int:
     md_out.parent.mkdir(parents=True, exist_ok=True)
     json_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     md_out.write_text(render_candidate_report(report), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def command_classify_context(args: argparse.Namespace) -> int:
+    source = Path(args.source)
+    if not source.exists():
+        raise ContextProofInputError(f"Context path does not exist: {source}")
+    classification = classify_context_scenario(
+        source,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else context_output_dir(source.resolve())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "context-classification.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "context-classification.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(classification, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_classification_markdown(classification), encoding="utf-8")
+    print(json.dumps(classification, indent=2))
+    return 0
+
+
+def command_route_optimizer(args: argparse.Namespace) -> int:
+    source = Path(args.source)
+    if not source.exists():
+        raise ContextProofInputError(f"Context path does not exist: {source}")
+    route = build_optimizer_route(
+        source,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else context_output_dir(source.resolve())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "optimizer-route.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "optimizer-instructions.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(route, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_optimizer_route_markdown(route), encoding="utf-8")
+    print(json.dumps(route, indent=2))
+    return 0
+
+
+def command_evaluate_gold(args: argparse.Namespace) -> int:
+    scenario = Path(args.scenario)
+    candidate = Path(args.candidate)
+    if not scenario.exists() or not scenario.is_dir():
+        raise ContextProofInputError(f"Scenario directory does not exist: {scenario}")
+    if not candidate.exists():
+        raise ContextProofInputError(f"Candidate path does not exist: {candidate}")
+    report = evaluate_gold_candidate(
+        scenario,
+        candidate,
+        deterministic=args.deterministic,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else context_output_dir(scenario.resolve())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "gold-evaluation.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "gold-evaluation.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_gold_evaluation_markdown(report), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def command_calibrate_scorer(args: argparse.Namespace) -> int:
+    cases = Path(args.cases)
+    if not cases.exists():
+        raise ContextProofInputError(f"Calibration cases file does not exist: {cases}")
+    report = calibrate_scorer(cases, deterministic=args.deterministic)
+    output_dir = Path(args.output_dir) if args.output_dir else context_output_dir(cases.resolve())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "scorer-calibration.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "scorer-calibration.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_calibration_markdown(report), encoding="utf-8")
     print(json.dumps(report, indent=2))
     return 0
 
@@ -1905,7 +3052,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     minimize = subparsers.add_parser("minimize", help="Generate a generic AGENTS.md starter scaffold.")
     minimize.add_argument("repo", help="Repository path.")
-    minimize.add_argument("--output", help="Write candidate to this path. Defaults to stdout.")
+    minimize.add_argument("--output", help="Write candidate under .contextproof/. Defaults to stdout.")
     minimize.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
     minimize.add_argument(
         "--project-mode",
@@ -1952,6 +3099,51 @@ def build_parser() -> argparse.ArgumentParser:
         help="Declare whether this is an existing, new, or migration project context.",
     )
     compare.set_defaults(func=command_compare_context)
+
+    classify = subparsers.add_parser("classify-context", help="Classify agent-context scenario and optimizer template.")
+    classify.add_argument("source", help="Agent context file or repository directory.")
+    classify.add_argument("--json-out", help="Write JSON classification report to this path.")
+    classify.add_argument("--md-out", help="Write markdown classification report to this path.")
+    classify.add_argument("--output-dir", help="Write default classification outputs to this directory.")
+    classify.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    classify.add_argument(
+        "--project-mode",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
+    )
+    classify.set_defaults(func=command_classify_context)
+
+    route = subparsers.add_parser("route-optimizer", help="Render scenario-specific optimizer instructions.")
+    route.add_argument("source", help="Agent context file or repository directory.")
+    route.add_argument("--json-out", help="Write JSON optimizer route to this path.")
+    route.add_argument("--md-out", help="Write markdown optimizer instructions to this path.")
+    route.add_argument("--output-dir", help="Write default optimizer route outputs to this directory.")
+    route.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    route.add_argument(
+        "--project-mode",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
+    )
+    route.set_defaults(func=command_route_optimizer)
+
+    gold = subparsers.add_parser("evaluate-gold", help="Compare a scenario candidate against the gold reference.")
+    gold.add_argument("scenario", help="Scenario directory containing source/, expected.json, and gold/.")
+    gold.add_argument("candidate", help="Candidate context file or directory to evaluate.")
+    gold.add_argument("--json-out", help="Write JSON gold evaluation to this path.")
+    gold.add_argument("--md-out", help="Write markdown gold evaluation to this path.")
+    gold.add_argument("--output-dir", help="Write default gold evaluation outputs to this directory.")
+    gold.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    gold.set_defaults(func=command_evaluate_gold)
+
+    calibration = subparsers.add_parser("calibrate-scorer", help="Run deterministic scorer calibration cases.")
+    calibration.add_argument("cases", help="Calibration JSONL file.")
+    calibration.add_argument("--json-out", help="Write scorer calibration JSON to this path.")
+    calibration.add_argument("--md-out", help="Write scorer calibration markdown to this path.")
+    calibration.add_argument("--output-dir", help="Write default scorer calibration outputs to this directory.")
+    calibration.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    calibration.set_defaults(func=command_calibrate_scorer)
 
     optimizer = subparsers.add_parser("benchmark-optimizer", help="Record optimizer candidate results across scenario fixtures.")
     optimizer.add_argument("scenarios", nargs="?", default="examples/scenarios", help="Directory containing scenario fixtures.")

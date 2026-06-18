@@ -1,5 +1,49 @@
 # Changelog
 
+## 0.5.1
+
+- Reworked the README and Chinese README around a shorter skill-first adoption
+  path: copy one prompt into a coding agent, install the skill, and review
+  `.contextproof/` outputs.
+- Compressed `skill/context-proof/SKILL.md` so normal invocations focus on the
+  user workflow, while maintainer-only gold, benchmark, calibration, and
+  acceptance commands are clearly separated.
+- Added `docs/CAPABILITY_BOUNDARIES.md` to define the core user loop,
+  maintainer-only loop, size profile, simplification rules, and guardrails.
+- Kept package and skill metadata at `0.5.1`; report schema remains `0.5.0`
+  because no output schema changed.
+
+## 0.5.0
+
+- Added gold/reference candidates for all eight built-in agent-context
+  scenarios.
+- Added `evaluate-gold` for deterministic source-vs-candidate-vs-gold
+  evaluation, including preservation, unsafe regression, and overcompression
+  checks.
+- Extended optimizer benchmarks with gold alignment verdicts, scores, unsafe
+  regression counts, overcompression counts, and missing-preservation counts.
+- Added `calibrate-scorer` and a scorer calibration JSONL fixture set for
+  checking expected issue ids, severity, dimensions, and score buckets.
+- Added `scripts/acceptance_v05.py` and `make acceptance` as the repeatable
+  v0.5 acceptance flow.
+- Updated the standalone skill runner and docs so the skill workflow is now
+  audit -> classify/route -> draft candidate -> compare -> evaluate gold when a
+  scenario fixture exists -> benchmark.
+
+## 0.4.0
+
+- Added scenario classification for agent-facing context with
+  `classify-context`.
+- Added `route-optimizer`, which selects a scenario-specific optimizer template
+  and writes `.contextproof/optimizer-instructions.md`.
+- Added optimizer templates for new-project `/init` briefs, existing project
+  rules, multi-agent migrations, workflow SOPs, safety-sensitive context, and
+  token-heavy context.
+- Extended optimizer benchmark rows and summaries with classified scenario
+  routes, selected templates, and classification match rates.
+- Updated skill workflow and documentation so optimization follows
+  classify -> route -> draft candidate -> compare.
+
 ## 0.3.0
 
 - Repositioned ContextProof around the core agent-context optimization loop:

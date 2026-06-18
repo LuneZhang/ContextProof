@@ -12,7 +12,7 @@ Use this file as the shared repo-level source of truth for coding agents.
 
 ## Validation
 
-- For backend changes, run `make test`.
+- Backend changes: `make test`.
 - If validation is skipped, explain why.
 
 ## Migration Notes

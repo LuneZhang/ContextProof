@@ -19,9 +19,12 @@ Before drafting a candidate:
 
 1. Run the ContextProof audit.
 2. Read `.contextproof/report.md` or the JSON findings.
-3. Read the source context file or files.
-4. Identify which content is actually loaded as coding-agent context.
-5. Ignore ordinary README or design documentation unless it is explicitly
+3. Run or inspect `route-optimizer` for the source context.
+4. Read `.contextproof/optimizer-instructions.md`.
+5. Read the selected scenario template under `references/templates/`.
+6. Read the source context file or files.
+7. Identify which content is actually loaded as coding-agent context.
+8. Ignore ordinary README or design documentation unless it is explicitly
    injected into an agent prompt.
 
 ## Preserve
@@ -40,6 +43,8 @@ Preserve these unless clearly obsolete:
 
 Prefer these transformations:
 
+- Follow the selected scenario template. Do not use one universal rewrite
+  strategy for all context.
 - Replace vague rules with concrete commands, paths, or acceptance criteria.
 - Convert "always read the whole repository" into relevance-based exploration.
 - Deduplicate repeated rules across files.
@@ -58,6 +63,8 @@ Do not produce a candidate that:
 - deletes important project-specific paths or package names
 - makes dangerous shell commands easier to run
 - hides safety or approval requirements
+- becomes shorter by deleting acceptance criteria, validation-gap handling, or
+  scenario-specific constraints
 - turns static hygiene into a claim of proven agent performance
 - rewrites ordinary documentation that is not agent context
 
@@ -80,3 +87,25 @@ python scripts/contextproof.py compare-context SOURCE_PATH CANDIDATE_PATH
 
 Use the candidate report to decide whether the draft is improved, mixed, or a
 regression.
+
+When the source is one of the built-in scenarios and `gold/AGENTS.gold.md`
+exists, also run:
+
+```bash
+python scripts/contextproof.py evaluate-gold SCENARIO_DIR CANDIDATE_PATH
+```
+
+Use this only for benchmark fixtures. Gold references are not project-specific
+answers for arbitrary user repositories.
+
+## Scenario Templates
+
+Use the route selected by ContextProof:
+
+- `templates/new-project-init.md` for saved `/init` or bootstrap summaries.
+- `templates/existing-project-rules.md` for established repository rules.
+- `templates/multi-agent-migration.md` for overlapping agent context files.
+- `templates/workflow-sop.md` for repeatable procedures.
+- `templates/safety-sensitive.md` for production, data, secret, deploy, or
+  destructive-operation context.
+- `templates/token-heavy.md` for oversized or low-density context.

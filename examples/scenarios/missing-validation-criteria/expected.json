@@ -1,6 +1,7 @@
 {
   "scenario_id": "missing-validation-criteria",
   "project_mode": "existing_project",
+  "expected_primary_scenario": "existing-project-agent-rules",
   "expected_issue_ids": [
     "vague-rule",
     "missing-test-command"
@@ -8,5 +9,18 @@
   "preserve": [
     "src/payments",
     "jobs/billing.py"
+  ],
+  "gold_path": "gold/AGENTS.gold.md",
+  "gold_primary_scenario": "existing-project-agent-rules",
+  "gold_must_preserve": [
+    "src/payments",
+    "jobs/billing.py"
+  ],
+  "gold_must_remove_issue_ids": [
+    "vague-rule",
+    "missing-test-command"
+  ],
+  "gold_allowed_tradeoffs": [
+    "When no command exists, the candidate may explicitly require reporting the validation gap."
   ]
 }

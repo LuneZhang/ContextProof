@@ -1,6 +1,7 @@
 {
   "scenario_id": "multi-agent-migration",
   "project_mode": "migration_project",
+  "expected_primary_scenario": "multi-agent-context-migration",
   "expected_issue_ids": [
     "duplicate-rule",
     "conflicting-rule",
@@ -9,5 +10,22 @@
   "preserve": [
     "make test",
     "services/api"
+  ],
+  "gold_path": "gold/AGENTS.gold.md",
+  "gold_primary_scenario": "multi-agent-context-migration",
+  "gold_must_preserve": [
+    "make test",
+    "services/api",
+    "AGENTS.md",
+    "CLAUDE.md",
+    ".cursor/rules/repo.mdc"
+  ],
+  "gold_must_remove_issue_ids": [
+    "duplicate-rule",
+    "conflicting-rule",
+    "vague-rule"
+  ],
+  "gold_allowed_tradeoffs": [
+    "A canonical AGENTS.md can replace repeated agent-specific rules when migration notes preserve the source surfaces."
   ]
 }

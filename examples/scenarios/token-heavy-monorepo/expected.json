@@ -1,6 +1,7 @@
 {
   "scenario_id": "token-heavy-monorepo",
   "project_mode": "existing_project",
+  "expected_primary_scenario": "token-heavy-context",
   "expected_issue_ids": [
     "vague-rule",
     "overbroad-context",
@@ -11,5 +12,22 @@
     "services/api",
     "packages/ui",
     "pnpm test"
+  ],
+  "gold_path": "gold/AGENTS.gold.md",
+  "gold_primary_scenario": "token-heavy-context",
+  "gold_must_preserve": [
+    "apps/web",
+    "services/api",
+    "packages/ui",
+    "packages/config",
+    "pnpm test"
+  ],
+  "gold_must_remove_issue_ids": [
+    "vague-rule",
+    "overbroad-context",
+    "duplicate-rule"
+  ],
+  "gold_allowed_tradeoffs": [
+    "Repeated directory maps should collapse to one essential path list."
   ]
 }

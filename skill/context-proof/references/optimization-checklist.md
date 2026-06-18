@@ -10,6 +10,8 @@ Use this checklist before recommending an optimized context candidate.
 - [ ] Identify whether this is an existing project, new-project `/init` brief,
   or migration between agent surfaces.
 - [ ] Read the ContextProof findings before editing.
+- [ ] Run or inspect `route-optimizer` output before drafting.
+- [ ] Read the selected scenario template under `references/templates/`.
 
 ## Preservation
 
@@ -35,6 +37,9 @@ Use this checklist before recommending an optimized context candidate.
 - [ ] Include a short rationale.
 - [ ] List unresolved risks.
 - [ ] Run `compare-context` and inspect regression flags.
+- [ ] For included scenario fixtures, run `evaluate-gold` and inspect the gold
+  alignment verdict.
+- [ ] Report the selected classification route and template.
 
 ## Accept Candidate Only If
 
@@ -43,4 +48,6 @@ Use this checklist before recommending an optimized context candidate.
 - [ ] Token estimate decreases or the added text is justified.
 - [ ] Validation commands are preserved.
 - [ ] No new risky shell or safety findings are introduced.
+- [ ] Gold verdict is `gold_aligned` or `partially_aligned` when a gold
+  reference exists.
 - [ ] Any removed project-specific paths are intentionally removed and noted.

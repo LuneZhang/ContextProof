@@ -1,4 +1,4 @@
-.PHONY: test audit minimize benchmark
+.PHONY: test audit minimize benchmark acceptance
 
 test:
 	python -m unittest discover -s tests
@@ -11,3 +11,6 @@ minimize:
 
 benchmark:
 	python -m contextproof.cli summarize-runs examples/benchmark-runs.jsonl --md-out .contextproof/benchmark-summary.md
+
+acceptance:
+	python scripts/acceptance_v05.py

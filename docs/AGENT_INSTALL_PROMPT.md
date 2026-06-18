@@ -17,9 +17,12 @@ Goal:
   general Markdown optimizer.
 
 After installation, use the context-proof skill to audit and optimize this
-repository's agent context. Generate:
+repository's agent context. Classify the source context first, route to the
+selected optimizer template, and then draft a candidate. Generate:
 - .contextproof/report.md
 - .contextproof/pr-comment.md
+- .contextproof/context-classification.md
+- .contextproof/optimizer-instructions.md
 - optimized candidate drafts under .contextproof/candidates/
 - .contextproof/candidate-report.md
 
@@ -31,6 +34,10 @@ python -m pip install -e .
 
 If the contextproof command is unavailable, run:
 python -m contextproof.cli audit . --pr-comment
+
+Before drafting a candidate, route the source context with:
+python -m contextproof.cli classify-context SOURCE_CONTEXT_PATH
+python -m contextproof.cli route-optimizer SOURCE_CONTEXT_PATH
 
 After drafting a candidate, compare it with:
 python -m contextproof.cli compare-context SOURCE_CONTEXT_PATH CANDIDATE_CONTEXT_PATH

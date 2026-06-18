@@ -1,6 +1,7 @@
 {
   "scenario_id": "new-project-init-brief",
   "project_mode": "new_project",
+  "expected_primary_scenario": "new-project-init-summary",
   "expected_issue_ids": [
     "vague-rule",
     "overbroad-context"
@@ -8,5 +9,18 @@
   "preserve": [
     "npm test",
     "TypeScript service"
+  ],
+  "gold_path": "gold/AGENTS.gold.md",
+  "gold_primary_scenario": "new-project-init-summary",
+  "gold_must_preserve": [
+    "npm test",
+    "TypeScript service"
+  ],
+  "gold_must_remove_issue_ids": [
+    "vague-rule",
+    "overbroad-context"
+  ],
+  "gold_allowed_tradeoffs": [
+    "Incomplete test setup may be called out explicitly instead of inventing commands."
   ]
 }

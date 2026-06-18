@@ -1,154 +1,109 @@
 ---
 name: context-proof
-description: Audit, optimize, and benchmark repository-level AI coding-agent context files with deterministic evidence. Use when an agent needs to evaluate or improve AGENTS.md, CLAUDE.md, SKILL.md, .cursor/rules, MCP notes, saved /init briefs, or other coding-agent instructions; detect risky, vague, duplicated, oversized, or contradictory rules; generate safe optimized candidate drafts under .contextproof/candidates; compare original context against candidates; or summarize recorded agent benchmark runs across variants such as none, current, native-init, and contextproof-reviewed.
+description: Audit and optimize coding-agent context files such as AGENTS.md, CLAUDE.md, SKILL.md, .cursor/rules, MCP notes, and saved /init briefs. Use to find vague, unsafe, contradictory, oversized, or hard-to-validate persistent instructions; route to a scenario template; draft candidates under .contextproof/candidates; compare candidate quality; or run maintainer benchmarks.
 ---
 
 # ContextProof
 
 ## Purpose
 
-Treat coding-agent context as testable infrastructure. Prefer deterministic
-checks and measured run data over subjective judgment. Do not claim a context
-improves agent performance unless benchmark evidence supports that claim.
+Improve Markdown that is actually loaded into a coding agent's prompt context.
+Do not use this skill as a general Markdown linter, README optimizer, CI
+dashboard, or automatic rewrite tool.
 
 ## Scope
 
-Audit Markdown that is loaded as coding-agent context, including `AGENTS.md`,
-`CLAUDE.md`, `GEMINI.md`, `.cursor/rules`, `SKILL.md`, MCP notes, agent notes,
-and `/init` output only after it has been saved as a persistent context file.
+Use ContextProof for persistent agent-facing context:
 
-Do not treat ordinary README files, design docs, or one-off chat prompts as
-audit targets unless they are actually injected into agent context.
+- `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`
+- `.cursor/rules/*`, `.github/copilot-instructions.md`
+- `SKILL.md`, MCP notes, agent notes
+- saved `/init` repository briefs
 
-## Primary Workflow: Audit
+Ignore ordinary README files, design docs, one-off chat prompts, and business
+documentation unless the user says they are injected into agent context.
 
-1. Identify the repository to audit. Use the current working directory unless
-   the user gives another path.
+## Default User Workflow
 
-2. Run the bundled deterministic runner from this skill folder:
+When the user asks to audit, tighten, optimize, reduce, or improve agent
+context:
+
+1. Run the local audit:
 
    ```bash
    python scripts/contextproof.py audit /path/to/repo --pr-comment
    ```
 
-   For a fresh repository, add `--project-mode new_project`. For migrations
-   between agents or stacks, add `--project-mode migration_project`.
+   Add `--project-mode new_project` for a fresh repository or
+   `--project-mode migration_project` for multi-agent context migration.
 
-   If the `contextproof` CLI is already installed, this equivalent command is
-   also acceptable:
+2. Choose the source context file or directory to optimize.
+
+3. Route it to the selected optimizer template:
 
    ```bash
-   contextproof audit /path/to/repo --pr-comment
+   python scripts/contextproof.py route-optimizer /path/to/source/AGENTS.md
    ```
 
-3. Review the generated files under `/path/to/repo/.contextproof/`:
+4. Read only the references needed for the selected route:
 
-   - `report.json`
-   - `report.md`
-   - `pr-comment.md`
-   - optional `context.min.md`, only when the user explicitly requests a generic starter scaffold
-   - optional `minimize-rationale.md`, only when `context.min.md` is generated
+   - always read `references/context-optimizer.md`
+   - read `references/classifier.md` only when route evidence is unclear
+   - read the selected file under `references/templates/`
+   - use `references/optimization-checklist.md` before recommending the result
 
-4. Report the static score, confidence state, critical/high findings, evidence,
-   and generated file paths.
-
-5. When reviewing a branch or PR, use `--changed-against` if the user provides
-   a base ref/range. Use `--baseline` if the user provides a previous
-   `.contextproof/report.json`.
-
-6. If the user explicitly asks for a starter scaffold, rerun audit with
-   `--minimize`. Treat `context.min.md` as a generic starter only. Do not
-   overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or other
-   context files unless the user explicitly asks.
-
-## Optimization Workflow
-
-Use this workflow when the user asks to optimize, tighten, reduce, improve, or
-rewrite agent context.
-
-1. Read `references/context-optimizer.md` and
-   `references/optimization-checklist.md`.
-
-2. Run the audit workflow first and read the findings.
-
-3. Pick the source context file that should be optimized. If multiple files
-   overlap, optimize one clear candidate first unless the user asks for a
-   migration pass.
-
-4. Write the optimized candidate under `.contextproof/candidates/`. Preserve
-   source filenames when possible, for example
+5. Draft the candidate under `.contextproof/candidates/`. Preserve source
+   filenames when possible, for example
    `.contextproof/candidates/AGENTS.contextproof.md`.
 
-5. Do not overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or
+6. Never overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or
    other source context files unless the user explicitly approves after seeing
    the candidate and comparison report.
 
-6. Compare the original and candidate:
+7. Compare original and candidate:
 
    ```bash
    python scripts/contextproof.py compare-context /path/to/source/AGENTS.md /path/to/repo/.contextproof/candidates/AGENTS.contextproof.md
    ```
 
-   If the installed CLI is available:
+8. Report:
 
-   ```bash
-   contextproof compare-context /path/to/source/AGENTS.md /path/to/repo/.contextproof/candidates/AGENTS.contextproof.md
-   ```
+   - static score and critical/high findings
+   - primary scenario and selected template
+   - candidate path
+   - score delta and token delta
+   - preserved validation commands and project paths
+   - regression flags and generated report paths
 
-7. Report the candidate path, score delta, estimated token delta, resolved
-   findings, introduced findings, preservation warnings, regression flags, and
-   generated candidate report path.
-
-## Benchmark Runs
-
-If recorded benchmark runs exist, summarize them:
-
-```bash
-python scripts/contextproof.py summarize-runs /path/to/runs.jsonl --md-out /path/to/repo/.contextproof/benchmark-summary.md
-```
-
-To merge those runs into the main audit report:
-
-```bash
-python scripts/contextproof.py audit /path/to/repo --runs /path/to/runs.jsonl --pr-comment
-```
-
-Read `references/benchmark-design.md` before designing or changing benchmark
-inputs.
-
-## Optimizer Prompt Benchmarks
-
-When comparing optimizer prompt variants, use the scenario corpus and candidate
-outputs:
-
-```bash
-python scripts/contextproof.py benchmark-optimizer /path/to/repo/examples/scenarios \
-  --prompt-variant baseline \
-  --jsonl-out /path/to/repo/.contextproof/optimizer-runs.jsonl \
-  --md-out /path/to/repo/.contextproof/optimizer-summary.md
-```
-
-The runner does not call an LLM. It records results for candidates already
-written by the active coding agent, so prompt variants can be compared on the
-same fixtures without guessing.
-
-## Evidence Model
-
-- Static hygiene: deterministic scan and six-dimension score for
-  discoverability, actionability, minimality, consistency, safety, and workflow
-  fit.
-- Behavioral evidence: recorded agent runs across variants such as `none`,
-  `current`, native `/init`, and `contextproof-reviewed`.
-
-Read `references/scoring-rubric.md` before changing scoring weights or severity
-levels. Read `references/context-antipatterns.md` when explaining findings.
-Read `references/context-optimizer.md` before drafting optimized context.
+Treat regression flags as blockers until reviewed.
 
 ## Output Policy
 
-- Lead with static score, confidence state, and critical/high findings.
-- Distinguish static risk from measured benchmark outcomes.
-- Avoid claiming performance improvement unless behavioral run data supports it.
-- Do not present deterministic findings alone as proof that a rewrite is better.
-- For optimization requests, provide a candidate and compare it against the
-  original. Treat regression flags as blockers until reviewed.
+- Write generated files under `.contextproof/` or a temporary directory.
+- Do not claim real coding-agent performance improvement from static scores.
+- Say when no validation command was found.
+- Say when a candidate removed or negated a validation command, path anchor, or
+  safety boundary.
+- Keep the user's normal workflow simple; mention benchmark, gold, and
+  calibration commands only for maintainers or fixture work.
+
+## Maintainer Commands
+
+Use these only for ContextProof development:
+
+```bash
+python scripts/contextproof.py evaluate-gold SCENARIO_DIR CANDIDATE_PATH
+python scripts/contextproof.py benchmark-optimizer examples/scenarios
+python scripts/contextproof.py calibrate-scorer examples/calibration/cases.jsonl
+python scripts/acceptance_v05.py
+```
+
+Gold references are benchmark fixtures only. Do not present them as automatic
+answers for user repositories.
+
+## References
+
+- `references/context-optimizer.md`: candidate rules
+- `references/templates/`: scenario templates
+- `references/scoring-rubric.md`: scoring and calibration
+- `references/benchmark-design.md`: benchmark and gold policy

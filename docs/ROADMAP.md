@@ -104,23 +104,137 @@ ContextProof should optimize persistent agent-facing Markdown such as
 - Do not tune many more static rules unless they are required to evaluate
   optimized context candidates.
 
-## V0.4 Distribution And Review Surfaces
+## V0.4 Scenario Router And Template-Guided Optimization
+
+Status: complete.
+
+V0.4 adds the missing routing layer between static audit findings and the
+optimizer prompt. ContextProof should not rely on one universal rewrite prompt
+for every agent-context file. It should first classify the user's actual
+context scenario, then select a focused optimizer template.
+
+### Product Objective
+
+- A user can classify an agent-facing context file or context directory before
+  asking the coding agent to rewrite it.
+- The skill selects an optimizer template based on agent-context scenario, not
+  on business domain or generic Markdown type.
+- The generated route tells the coding agent what to preserve, what to remove,
+  and which scenario-specific template to read.
+- Optimizer benchmarks are grouped by classified scenario route, so prompt
+  changes can be judged per scenario instead of only by aggregate score.
+
+### Primary Deliverables
+
+- `classify-context` command for scenario classification.
+- `route-optimizer` command for generating `.contextproof/optimizer-instructions.md`.
+- Classifier reference and optimizer templates for:
+  - new-project `/init` summaries
+  - existing-project agent rules
+  - multi-agent context migration
+  - workflow or SOP context
+  - safety-sensitive context
+  - token-heavy context
+- Scenario fixture metadata with expected primary routes.
+- Optimizer benchmark route summaries and classification match rates.
+- README and skill workflow updates for classify -> route -> candidate ->
+  compare.
+
+### Non-Goals For V0.4
+
+- Do not create an industry template library.
+- Do not automatically rewrite or replace source context files.
+- Do not use the classifier as proof that a candidate is good.
+- Do not move the product center to CI, GitHub Actions, or hosted dashboards.
+
+## V0.5 Scorer Calibration And Gold Candidates
+
+Status: complete.
+
+V0.5 calibrates ContextProof's judgment loop. It does not expand the product
+into CI, dashboards, industry template libraries, or a generic Markdown linter.
+
+### Product Objective
+
+- Use curated gold/reference candidates to test whether optimized agent context
+  preserved project constraints while removing the intended issues.
+- Catch bad candidates that get shorter by deleting validation commands, path
+  anchors, or safety boundaries.
+- Calibrate deterministic scoring against focused agent-context examples.
+- Provide a repeatable local acceptance flow that maintainers can run before
+  changing optimizer prompts or scorer rules.
+
+### Primary Deliverables
+
+- Gold candidates for all eight built-in scenarios under
+  `examples/scenarios/*/gold/AGENTS.gold.md`.
+- `evaluate-gold` for source-vs-candidate-vs-gold evaluation.
+- Optimizer benchmark gold fields and aggregate gold alignment metrics.
+- `examples/calibration/cases.jsonl` plus `calibrate-scorer`.
+- `scripts/acceptance_v05.py` and `make acceptance`.
+- Standalone skill runner support for the new v0.5 commands.
+
+### Non-Goals For V0.5
+
+- Do not use an LLM judge.
+- Do not claim real coding-agent performance gains without behavioral runs.
+- Do not turn gold candidates into automatic answers for user repositories.
+- Do not broaden deterministic rules beyond what candidate evaluation needs.
+
+## V0.5.1 Skill-First Adoption Polish
+
+Status: complete.
+
+V0.5.1 makes the product easier to understand without adding new evaluation
+surface area.
+
+### Product Objective
+
+- Make the first user action obvious: install the skill and ask the coding
+  agent to audit and optimize repository agent context.
+- Keep the normal path short while preserving maintainer workflows for gold,
+  calibration, benchmark, and acceptance.
+- Reduce prompt-load risk by keeping `SKILL.md` concise and moving detail into
+  references or repository docs.
+
+### Primary Deliverables
+
+- Skill-first README and Chinese README.
+- Shorter `skill/context-proof/SKILL.md`.
+- `docs/CAPABILITY_BOUNDARIES.md` for capability limits and size-control rules.
+- Version metadata update to `0.5.1` while keeping report schema `0.5.0`.
+
+### Non-Goals For V0.5.1
+
+- Do not add new deterministic rules.
+- Do not expand scenario templates.
+- Do not add CI, dashboard, hosted service, or LLM judge behavior.
+
+## V0.6 Agent Baselines And Scenario Expansion
+
+- Helpers for collecting native `/init` outputs from supported agents where
+  stable workflows exist.
+- Larger existing-project, new-project, migration, safety, and token-heavy
+  scenario fixture sets.
+- Agent-specific overlays for Codex, Claude Code, OpenCode, Cursor, Windsurf,
+  Pi, Copilot, and similar tools.
+- Overlay scope is limited to loader paths, invocation style, and file-format
+  differences; core optimization logic stays scenario-driven.
+
+## V0.7 Distribution And Review Surfaces
 
 - GitHub Action packaging.
 - Optional PR comment posting.
 - Score trend reports.
 - Comment-only default with explicit opt-in gates.
+- Keep these as distribution surfaces, not the primary product loop.
 
-## V0.5 Agent Baselines And Scenario Expansion
+## V0.8 Behavioral Evidence
 
-- Helpers for collecting native `/init` outputs.
-- Larger existing-project and new-project scenario fixture sets.
-- Agent-specific adapters where stable APIs exist.
+- Real paired coding-agent task runs across `none`, `current`,
+  `native-init`, and `contextproof-reviewed`.
+- Per-scenario behavioral evidence reports.
+- Optional LLM advisory annotations after deterministic metrics are recorded.
+- No claim of real performance improvement without paired behavioral data.
 
-## V0.6 Optimization Calibration
-
-- Fixture-driven scorer calibration.
-- Optional LLM advisory rewrites that never replace deterministic scoring.
-- Behavioral benchmark evidence when real paired agent runs are available.
-
-See [TODO](TODO.md) for the detailed V0.3 implementation checklist.
+See [TODO](TODO.md) for the detailed current implementation checklist.

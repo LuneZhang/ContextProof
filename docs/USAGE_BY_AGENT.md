@@ -9,9 +9,11 @@ is loaded as coding-agent context.
 Its core workflow is:
 
 1. Audit agent-facing context.
-2. Draft optimized candidates under `.contextproof/candidates/`.
-3. Compare candidates against the original context.
-4. Report score delta, token delta, preserved requirements, unresolved risks,
+2. Classify the source context scenario.
+3. Route to the selected optimizer template.
+4. Draft optimized candidates under `.contextproof/candidates/`.
+5. Compare candidates against the original context.
+6. Report scenario, template, score delta, token delta, preserved requirements,
    and regression flags.
 
 ## Support Levels
@@ -37,9 +39,10 @@ Prompt:
 
 ```text
 Use $context-proof to audit and optimize this repository's agent context.
+Classify the source context first and use the selected optimizer template.
 Write optimized drafts under .contextproof/candidates/.
 Compare each candidate against its original context.
-Report static score, score delta, token delta, preserved requirements, unresolved risks, regression flags, and generated files.
+Report static score, primary scenario, selected template, score delta, token delta, preserved requirements, unresolved risks, regression flags, and generated files.
 Do not overwrite existing context files.
 ```
 
@@ -63,6 +66,7 @@ Prompt:
 
 ```text
 Use the context-proof skill to audit and optimize this repository's coding-agent instructions.
+Classify the source context scenario and use the selected optimizer template.
 Generate optimized candidates under .contextproof/candidates/ and compare them against the originals.
 Do not overwrite AGENTS.md, CLAUDE.md, or other existing context files.
 ```
@@ -80,7 +84,7 @@ Prompt:
 
 ```text
 Load the context-proof skill and audit this repository's agent context.
-Draft optimized candidates under .contextproof/candidates/, compare them against the originals, and summarize the generated .contextproof files.
+Classify the source context, route to the selected optimizer template, draft optimized candidates under .contextproof/candidates/, compare them against the originals, and summarize the generated .contextproof files.
 ```
 
 ## Cursor, Windsurf, Pi, And Other Agents
@@ -91,8 +95,10 @@ directly:
 ```text
 Use the ContextProof skill at /path/to/ContextProof/skill/context-proof.
 Audit and optimize this repository's agent context. Generate .contextproof/report.md,
-.contextproof/pr-comment.md, optimized drafts under .contextproof/candidates/,
-and candidate comparison reports. Do not overwrite existing context files.
+.contextproof/pr-comment.md, .contextproof/context-classification.md,
+.contextproof/optimizer-instructions.md, optimized drafts under
+.contextproof/candidates/, and candidate comparison reports. Do not overwrite
+existing context files.
 ```
 
 If the agent cannot run a skill folder directly, install the CLI fallback:
@@ -111,16 +117,39 @@ contextproof audit . --pr-comment --changed-against origin/main...HEAD
 To compare an optimized candidate:
 
 ```bash
+contextproof classify-context AGENTS.md
+contextproof route-optimizer AGENTS.md
 contextproof compare-context AGENTS.md .contextproof/candidates/AGENTS.contextproof.md
 ```
 
-To evaluate optimizer prompt variants against prepared scenarios:
+Maintainer-only fixture evaluation:
+
+```bash
+contextproof evaluate-gold examples/scenarios/existing-project-overbroad \
+  examples/scenarios/existing-project-overbroad/gold/AGENTS.gold.md
+```
+
+Maintainer-only prompt variant benchmark:
 
 ```bash
 contextproof benchmark-optimizer examples/scenarios \
   --prompt-variant baseline \
   --jsonl-out .contextproof/optimizer-runs.jsonl \
   --md-out .contextproof/optimizer-summary.md
+```
+
+Maintainer-only scorer calibration:
+
+```bash
+contextproof calibrate-scorer examples/calibration/cases.jsonl \
+  --json-out .contextproof/scorer-calibration.json \
+  --md-out .contextproof/scorer-calibration.md
+```
+
+To run the full maintainer acceptance flow:
+
+```bash
+python scripts/acceptance_v05.py
 ```
 
 To compare against a saved report:
@@ -140,6 +169,8 @@ Default to `existing_project`. For fresh repositories, ask the agent to use
 Ask for:
 
 - static context score
+- primary scenario
+- selected optimizer template
 - candidate score delta
 - estimated token delta
 - confidence state
