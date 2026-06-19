@@ -47,6 +47,115 @@ instead of a pile of CLI commands:
 - [x] Keep gold, benchmark, calibration, and acceptance as maintainer flows.
 - [x] Bump package and skill metadata to `0.5.1`.
 
+## V0.6 Definition Of Done
+
+V0.6 is complete when ContextProof's normal product workflow is simple enough
+for a user to run through their coding agent without learning maintainer
+commands:
+
+- One natural-language prompt can start the skill workflow.
+- ContextProof can discover likely agent-context files and explain scope.
+- The user receives one coherent `.contextproof/` work packet: audit,
+  classification, optimizer instructions, candidate path, and comparison.
+- The active coding agent gets focused rewrite instructions without loading
+  benchmark, gold, calibration, or acceptance material.
+- Candidate comparison clearly blocks unsafe regressions, removed validation
+  commands, negated validation commands, and lost project path anchors.
+- Source context files are never overwritten by default.
+- V0.5 acceptance remains green, and v0.6 adds checks for the one-prompt
+  workflow and standalone skill runner parity.
+
+## V0.6: Product/Development Separation
+
+- [x] Add or maintain a product strategy document that separates:
+  - [x] user-facing product loop
+  - [x] maintainer development loop
+  - [x] distribution track
+- [x] Keep README and skill instructions focused on the user-facing loop.
+- [x] Keep gold, calibration, benchmark, and acceptance commands in maintainer
+  docs only.
+- [x] Avoid presenting baseline experiments as a normal user feature.
+
+## V0.6: Context Discovery
+
+- [x] Add repository context discovery for supported agent-facing files:
+  - [x] `AGENTS.md`
+  - [x] `CLAUDE.md`
+  - [x] `GEMINI.md`
+  - [x] `.cursor/rules/*`
+  - [x] `.github/copilot-instructions.md`
+  - [x] `SKILL.md`
+  - [x] MCP notes
+  - [x] saved `/init` briefs
+- [x] Report why each discovered file is in scope.
+- [x] Warn, but do not fail, when only ordinary Markdown docs are found.
+- [x] Add tests for root files, nested rule files, empty repositories, and
+  ordinary README-only repositories.
+
+## V0.6: One-Prompt Workflow Packet
+
+- [x] Add a user-facing command or runner flow that performs:
+  - [x] discover
+  - [x] audit
+  - [x] classify-context
+  - [x] route-optimizer
+  - [x] write optimizer packet
+- [x] Write `.contextproof/workflow.md` with:
+  - [x] selected source files
+  - [x] primary scenario route
+  - [x] candidate output path
+  - [x] preserve list
+  - [x] remove or tighten list
+  - [x] validation and safety blockers
+  - [x] exact next instruction for the active coding agent
+- [x] Keep `.contextproof/workflow.md` concise enough to paste back into an
+  agent conversation.
+- [x] Add JSON output for machine-readable skill runner use.
+
+## V0.6: Candidate Review UX
+
+- [x] Consolidate comparison output into a user-readable summary.
+- [x] Highlight blockers first:
+  - [x] unsafe regression
+  - [x] removed validation command
+  - [x] negated validation command
+  - [x] removed project path anchor
+  - [x] new critical or high issue
+  - [x] overcompression
+- [x] Show score delta and token delta after blockers.
+- [x] Make the adoption recommendation explicit:
+  - [x] safe to consider
+  - [x] review required
+  - [x] do not adopt yet
+- [x] Do not automatically write changes back to source context files.
+
+## V0.6: Skill Hot-Path Size Control
+
+- [x] Keep `skill/context-proof/SKILL.md` short and procedural.
+- [x] Move detailed maintainer material out of the installed skill hot path.
+- [x] Load scenario templates only after routing selects them.
+- [x] Avoid adding agent-specific overlays unless they change file loading or
+  invocation style.
+- [x] Add a lightweight size check for the installed skill hot path.
+
+## V0.6 Acceptance Flow
+
+- [x] Keep all v0.5 acceptance checks passing.
+- [x] Add v0.6 checks for:
+  - [x] context discovery on fixture repositories
+  - [x] one-prompt workflow packet generation
+  - [x] workflow packet includes route, candidate path, and no-overwrite rule
+  - [x] candidate review summary blocker ordering
+  - [x] README-only repository warning behavior
+  - [x] skill hot-path size limit
+  - [x] standalone skill runner command parity
+  - [x] no tracked `.contextproof/`, cache, or generated files
+- [x] Exit codes should follow the existing acceptance convention:
+  - [x] `0` for pass
+  - [x] `1` for failed checks
+  - [x] `2` for fixture or input errors
+  - [x] `3` for internal exceptions
+
 ## V0.5 Definition Of Done
 
 V0.5 is complete when ContextProof can judge its own optimizer outputs against

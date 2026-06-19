@@ -8,14 +8,15 @@ review generated candidates under `.contextproof/`.
 
 | Step | Purpose | Boundary |
 | --- | --- | --- |
-| `audit` | Detect agent-context problems | Deterministic issue detection only; not a rewrite engine |
-| `classify-context` | Identify usage scenario | Agent-context scenarios only; not industry/domain classification |
-| `route-optimizer` | Select the optimizer template | Produces instructions for the active coding agent; does not rewrite source files |
+| `prepare-workflow` | Discover, audit, classify, route, and write the workflow packet | Prepares the active coding agent; does not draft or overwrite source files |
 | candidate draft | Create an optimized context candidate | Written by the coding agent under `.contextproof/candidates/` |
-| `compare-context` | Check original vs candidate | Detects score/token/preservation regressions; not proof of real agent performance |
+| `review-candidate` | Check original vs candidate and summarize adoption blockers | Detects score/token/preservation regressions; not proof of real agent performance |
 
 This loop is the product. Everything else supports maintenance, evaluation, or
 fallback usage.
+
+See [Product Strategy](PRODUCT_STRATEGY.md) for the separation between
+user-facing product work and maintainer-only development work.
 
 ## Maintainer-Only Loop
 
@@ -24,7 +25,11 @@ fallback usage.
 | `evaluate-gold` | Test fixture candidates against curated references | Built-in scenarios only; gold is not a user-project answer |
 | `benchmark-optimizer` | Compare optimizer prompt variants | Uses existing candidate files; does not call an LLM |
 | `calibrate-scorer` | Check deterministic scoring rules | Focused on agent-context issues; not broad Markdown linting |
-| `acceptance_v05.py` | Release gate | Local maintainer flow; not required for normal users |
+| `acceptance_v06.py` | Release gate | Local maintainer flow; not required for normal users |
+
+Baseline comparisons, optimizer variants, gold candidates, scorer calibration,
+and acceptance scripts are for improving ContextProof itself. They should not
+be required in the normal user workflow.
 
 ## Current Size Profile
 

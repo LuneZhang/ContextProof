@@ -33,6 +33,7 @@ IGNORE_DIRS = {
     ".next",
     ".nuxt",
     "coverage",
+    ".contextproof",
     "examples",
     ".pytest_cache",
     ".mypy_cache",
@@ -47,6 +48,10 @@ CONTEXT_BASENAMES = {
     "SKILL.md",
     "MCP.md",
     "MCP-SERVER.md",
+    "INIT.md",
+    "init.md",
+    "AGENT_CONTEXT.md",
+    "agent-context.md",
     ".cursorrules",
     ".windsurfrules",
     ".clinerules",
@@ -425,6 +430,8 @@ def read_text(path: Path, max_bytes: int = 512_000) -> str:
 def is_context_file(path: Path, root: Path) -> bool:
     name = path.name
     parts = set(path.relative_to(root).parts)
+    if name == "SKILL.md" and "skills" in parts and "context-proof" in parts:
+        return False
     if name in CONTEXT_BASENAMES:
         return True
     if ".cursor" in parts and "rules" in parts and path.suffix in {".md", ".mdc", ".txt"}:
@@ -442,6 +449,8 @@ def is_context_path(path: str) -> bool:
         return False
     parts = normalized.split("/")
     name = parts[-1]
+    if name == "SKILL.md" and "skills" in parts and "context-proof" in parts:
+        return False
     if name in CONTEXT_BASENAMES:
         return True
     if ".cursor" in parts and "rules" in parts and Path(name).suffix in {".md", ".mdc", ".txt"}:
@@ -517,10 +526,16 @@ def classify_context(path: Path, root: Path) -> str:
         return "agents"
     if path.name == "CLAUDE.md":
         return "claude"
+    if path.name == "GEMINI.md":
+        return "gemini"
     if ".cursor/rules/" in relative:
         return "cursor"
     if path.name == "SKILL.md":
         return "skill"
+    if path.name in {"INIT.md", "init.md", "AGENT_CONTEXT.md", "agent-context.md"}:
+        return "init-brief"
+    if path.name in {"MCP.md", "MCP-SERVER.md"}:
+        return "mcp"
     if ".github/copilot-instructions.md" in relative:
         return "copilot"
     return "agent-context"
@@ -540,6 +555,122 @@ def discover_context_files(root: Path) -> list[tuple[Path, str]]:
         if is_context_file(path, root):
             files.append((path, classify_context(path, root)))
     return sorted(files, key=lambda item: rel(item[0], root))
+
+
+def context_discovery_reason(path: Path, kind: str, root: Path) -> str:
+    relative = path.relative_to(root).as_posix()
+    if relative == "AGENTS.md":
+        return "Repository-level agent instructions loaded by many coding agents."
+    if path.name == "CLAUDE.md":
+        return "Claude Code repository context file."
+    if path.name == "GEMINI.md":
+        return "Gemini-style repository context file."
+    if ".cursor/rules/" in relative:
+        return "Cursor rule file under .cursor/rules."
+    if relative == ".github/copilot-instructions.md":
+        return "GitHub Copilot repository instruction file."
+    if path.name == "SKILL.md":
+        return "Agent skill instruction file that may be loaded into prompt context."
+    if kind == "mcp":
+        return "MCP note file that can guide tool or server usage."
+    if kind == "init-brief":
+        return "Saved /init-style repository brief that may be reused as agent context."
+    return "Supported persistent agent-context filename."
+
+
+def discover_context_entries(root: Path) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for path, kind in discover_context_files(root):
+        text = read_text(path)
+        relative = rel(path, root)
+        entries.append(
+            {
+                "path": relative,
+                "absolute_path": str(path.resolve()),
+                "kind": kind,
+                "chars": len(text),
+                "lines": len(text.splitlines()),
+                "token_estimate": estimate_tokens(text),
+                "reason": context_discovery_reason(path, kind, root),
+            }
+        )
+    return entries
+
+
+def ordinary_markdown_files(root: Path, limit: int = 20) -> list[str]:
+    items: list[str] = []
+    for path in iter_repo_files(root):
+        if path.suffix.lower() not in {".md", ".mdc", ".txt"}:
+            continue
+        if is_context_file(path, root):
+            continue
+        items.append(rel(path, root))
+        if len(items) >= limit:
+            break
+    return sorted(items)
+
+
+def discover_context_report(
+    root: Path,
+    deterministic: bool = False,
+    project_mode: str = "existing_project",
+) -> dict[str, Any]:
+    root = root.resolve()
+    if not root.exists() or not root.is_dir():
+        raise ContextProofInputError(f"Repository path does not exist or is not a directory: {root}")
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    entries = discover_context_entries(root)
+    ordinary = ordinary_markdown_files(root)
+    warnings: list[str] = []
+    if not entries:
+        warnings.append(
+            "No supported agent-facing context files were found. Ordinary README or docs files are not audited unless they are loaded into agent context."
+        )
+    if not entries and ordinary:
+        warnings.append(
+            "Ordinary Markdown files were found, but they are outside ContextProof scope unless a coding agent reads them as persistent context."
+        )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "discovery_type": "agent_context_files",
+        "root": str(root),
+        "project_mode": normalize_project_mode(project_mode),
+        "context_file_count": len(entries),
+        "context_files": entries,
+        "ordinary_markdown_examples": ordinary,
+        "warnings": warnings,
+        "scope_note": "ContextProof audits persistent Markdown loaded into coding-agent prompt context, not general project documentation.",
+    }
+
+
+def render_context_discovery_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        "# ContextProof Context Discovery",
+        "",
+        f"Root: `{report['root']}`",
+        f"Agent-context files: {report['context_file_count']}",
+        "",
+        "## In Scope",
+        "",
+    ]
+    if report["context_files"]:
+        for item in report["context_files"]:
+            lines.append(f"- `{item['path']}` ({item['kind']}): {item['reason']}")
+    else:
+        lines.append("- No supported agent-facing context files found.")
+    if report["warnings"]:
+        lines.extend(["", "## Warnings", ""])
+        for warning in report["warnings"]:
+            lines.append(f"- {warning}")
+    if report["ordinary_markdown_examples"]:
+        lines.extend(["", "## Ordinary Markdown Examples", ""])
+        for item in report["ordinary_markdown_examples"][:10]:
+            lines.append(f"- `{item}`")
+        lines.append("")
+        lines.append("These files are not optimization targets unless they are explicitly loaded as agent context.")
+    lines.append("")
+    return "\n".join(lines)
 
 
 def has_validation_gap_policy(text: str) -> bool:
@@ -1568,6 +1699,139 @@ def render_optimizer_route_markdown(route: dict[str, Any]) -> str:
     return route["instruction"]
 
 
+def workflow_source_path(root: Path, discovery: dict[str, Any]) -> Path:
+    files = discovery.get("context_files", [])
+    if len(files) == 1:
+        return Path(str(files[0]["absolute_path"])).resolve()
+    return root.resolve()
+
+
+def build_workflow_packet(
+    root: Path,
+    deterministic: bool = False,
+    project_mode: str = "existing_project",
+    output_dir: Path | None = None,
+) -> dict[str, Any]:
+    root = root.resolve()
+    if not root.exists() or not root.is_dir():
+        raise ContextProofInputError(f"Repository path does not exist or is not a directory: {root}")
+    normalized_project_mode = normalize_project_mode(project_mode)
+    generated_at = "1970-01-01T00:00:00+00:00" if deterministic else datetime.now(timezone.utc).isoformat()
+    output_dir = (output_dir.resolve() if output_dir else root / ".contextproof")
+    discovery = discover_context_report(root, deterministic=deterministic, project_mode=normalized_project_mode)
+    audit = audit_repo(root, deterministic=deterministic, project_mode=normalized_project_mode)
+    source = workflow_source_path(root, discovery)
+    route = build_optimizer_route(source, deterministic=deterministic, project_mode=normalized_project_mode)
+    classification = route["classification"]
+    candidate_hint = route["candidate_output_hint"]
+    candidate_path = (root / candidate_hint).resolve()
+    workflow_markdown = output_dir / "workflow.md"
+    compare_command = f'contextproof review-candidate "{source}" "{candidate_hint}"'
+    next_instruction = (
+        "Read .contextproof/workflow.md and .contextproof/optimizer-instructions.md. "
+        f"Draft the optimized agent-context candidate at {candidate_hint}. "
+        "Do not overwrite source context files. After writing the candidate, run "
+        f"{compare_command} and report the candidate review status."
+    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": generated_at,
+        "workflow_type": "one_prompt_context_optimization",
+        "root": str(root),
+        "project_mode": normalized_project_mode,
+        "output_dir": str(output_dir),
+        "source_path": str(source),
+        "selected_context_files": discovery["context_files"],
+        "warnings": discovery["warnings"],
+        "audit_summary": compact_report_summary(audit),
+        "classification": classification,
+        "candidate": {
+            "relative_path": candidate_hint,
+            "absolute_path": str(candidate_path),
+        },
+        "outputs": {
+            "discovery_json": str(output_dir / "context-discovery.json"),
+            "discovery_md": str(output_dir / "context-discovery.md"),
+            "audit_json": str(output_dir / "report.json"),
+            "audit_md": str(output_dir / "report.md"),
+            "classification_json": str(output_dir / "context-classification.json"),
+            "classification_md": str(output_dir / "context-classification.md"),
+            "optimizer_route_json": str(output_dir / "optimizer-route.json"),
+            "optimizer_instructions_md": str(output_dir / "optimizer-instructions.md"),
+            "workflow_json": str(output_dir / "workflow.json"),
+            "workflow_md": str(workflow_markdown),
+        },
+        "next_agent_instruction": next_instruction,
+    }
+
+
+def render_workflow_markdown(workflow: dict[str, Any]) -> str:
+    classification = workflow["classification"]
+    audit = workflow["audit_summary"]
+    candidate = workflow["candidate"]
+    lines = [
+        "# ContextProof Workflow",
+        "",
+        "Use this packet to draft one optimized agent-context candidate. Do not overwrite source context files.",
+        "",
+        "## Source Scope",
+        "",
+        f"- Root: `{workflow['root']}`",
+        f"- Source for comparison: `{workflow['source_path']}`",
+    ]
+    if workflow["selected_context_files"]:
+        lines.append("- In-scope context files:")
+        for item in workflow["selected_context_files"]:
+            lines.append(f"  - `{item['path']}`: {item['reason']}")
+    else:
+        lines.append("- No existing agent-context file was found. Draft a new candidate only under `.contextproof/candidates/`.")
+    if workflow["warnings"]:
+        lines.extend(["", "## Warnings", ""])
+        for warning in workflow["warnings"]:
+            lines.append(f"- {warning}")
+    lines.extend(
+        [
+            "",
+            "## Route",
+            "",
+            f"- Primary scenario: `{classification['primary_scenario']}`",
+            f"- Template: `{classification['selected_template']['reference_path']}`",
+            f"- Risk level: `{classification['risk_level']}`",
+            f"- Confidence: `{classification['confidence']}`",
+            "",
+            "## Current Audit",
+            "",
+            f"- Static score: {audit['score']} / 100",
+            f"- Estimated tokens: {audit['total_context_tokens']}",
+            f"- Critical/high findings: {audit['critical_high_finding_count']}",
+            "",
+            "## Candidate Task",
+            "",
+            f"- Write candidate to `{candidate['relative_path']}`.",
+            "- Preserve explicit validation commands, project paths, architecture facts, and safety constraints.",
+            "- Remove or tighten vague, duplicated, overbroad, unsafe, stale, or non-verifiable instructions.",
+            "- Keep ordinary README/product documentation out of persistent agent context unless it is actually loaded by the agent.",
+            "- Do not overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or any other source context file.",
+            "",
+            "## Next Agent Instruction",
+            "",
+            "```text",
+            workflow["next_agent_instruction"],
+            "```",
+            "",
+            "## After Candidate Is Written",
+            "",
+            "Run:",
+            "",
+            "```bash",
+            f"contextproof review-candidate \"{workflow['source_path']}\" \"{candidate['relative_path']}\"",
+            "```",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def compare_contexts(
     source_path: Path,
     candidate_path: Path,
@@ -1678,6 +1942,158 @@ def candidate_recommendation(verdict: str, regression_flags: list[str]) -> str:
     if verdict == "unchanged":
         return "Candidate did not materially change the measured context quality."
     return "Candidate has mixed results. Review resolved and introduced findings before deciding whether to adopt it."
+
+
+def build_candidate_review(comparison: dict[str, Any]) -> dict[str, Any]:
+    flags = set(comparison.get("regression_flags", []))
+    preservation = comparison.get("preservation", {})
+    deltas = comparison.get("deltas", {})
+    source_tokens = int(comparison.get("source", {}).get("total_context_tokens") or 0)
+    candidate_tokens = int(comparison.get("candidate", {}).get("total_context_tokens") or 0)
+    introduced = comparison.get("introduced_findings", [])
+    blockers: list[dict[str, Any]] = []
+
+    def add_blocker(blocker_id: str, severity: str, message: str, evidence: str) -> None:
+        blockers.append(
+            {
+                "id": blocker_id,
+                "severity": severity,
+                "message": message,
+                "evidence": evidence,
+            }
+        )
+
+    if "safety-score-decreased" in flags or any(item.get("id") == "risky-shell" for item in introduced):
+        add_blocker(
+            "unsafe-regression",
+            "critical",
+            "Candidate introduces or weakens safety-critical context.",
+            "Safety score decreased or risky-shell finding was introduced.",
+        )
+    if "dropped-all-validation-commands" in flags or "removed-some-validation-commands" in flags:
+        removed = preservation.get("removed_validation_commands", [])
+        add_blocker(
+            "removed-validation-command",
+            "high",
+            "Candidate removed validation commands from the source context.",
+            ", ".join(f"`{item}`" for item in removed) if removed else "All validation commands were dropped.",
+        )
+    if "negated-validation-command" in flags:
+        negated = preservation.get("negated_validation_commands", [])
+        add_blocker(
+            "negated-validation-command",
+            "high",
+            "Candidate kept a validation command but told the agent not to run it.",
+            ", ".join(f"`{item}`" for item in negated) if negated else "Validation command was negated.",
+        )
+    if "dropped-all-path-markers" in flags or "dropped-most-path-markers" in flags:
+        removed_paths = preservation.get("removed_path_markers", [])
+        add_blocker(
+            "removed-project-path-anchor",
+            "high",
+            "Candidate removed too many project path anchors.",
+            ", ".join(f"`{item}`" for item in removed_paths[:10]) if removed_paths else "Project path anchors were removed.",
+        )
+    if "introduced-critical-or-high-finding" in flags:
+        high_items = [item for item in introduced if item.get("severity") in {"critical", "high"}]
+        add_blocker(
+            "new-critical-high-issue",
+            "high",
+            "Candidate introduced a critical or high severity context issue.",
+            ", ".join(f"`{item.get('id')}`" for item in high_items[:10]) if high_items else "Critical/high finding introduced.",
+        )
+    if source_tokens and candidate_tokens <= max(1, int(source_tokens * 0.45)):
+        preservation_loss = bool(
+            preservation.get("removed_validation_commands")
+            or preservation.get("removed_path_markers")
+            or preservation.get("negated_validation_commands")
+        )
+        if preservation_loss or int(deltas.get("score_delta") or 0) <= 0:
+            add_blocker(
+                "overcompression",
+                "medium",
+                "Candidate is much shorter and may have removed useful execution context.",
+                f"Token estimate changed from {source_tokens} to {candidate_tokens}.",
+            )
+
+    hard_blockers = {
+        "unsafe-regression",
+        "removed-validation-command",
+        "negated-validation-command",
+        "removed-project-path-anchor",
+        "new-critical-high-issue",
+    }
+    blocker_ids = {item["id"] for item in blockers}
+    if blocker_ids & hard_blockers:
+        adoption_status = "do_not_adopt_yet"
+    elif blockers:
+        adoption_status = "review_required"
+    elif comparison.get("verdict") == "improved":
+        adoption_status = "safe_to_consider"
+    else:
+        adoption_status = "review_required"
+
+    if adoption_status == "safe_to_consider":
+        recommendation = "Safe to consider after manual review. Do not overwrite the source file until the user explicitly approves."
+    elif adoption_status == "do_not_adopt_yet":
+        recommendation = "Do not adopt this candidate yet. Resolve blockers and run ContextProof review again."
+    else:
+        recommendation = "Review required. The candidate is not clearly safer and more useful than the source."
+
+    return {
+        "schema_version": comparison["schema_version"],
+        "generated_at": comparison["generated_at"],
+        "review_type": "candidate_adoption_review",
+        "source_path": comparison["source_path"],
+        "candidate_path": comparison["candidate_path"],
+        "adoption_status": adoption_status,
+        "recommendation": recommendation,
+        "blockers": blockers,
+        "comparison": comparison,
+    }
+
+
+def render_candidate_review_markdown(review: dict[str, Any]) -> str:
+    comparison = review["comparison"]
+    deltas = comparison["deltas"]
+    lines = [
+        "# ContextProof Candidate Review",
+        "",
+        f"Adoption status: `{review['adoption_status']}`",
+        f"Comparison verdict: `{comparison['verdict']}`",
+        f"Source: `{review['source_path']}`",
+        f"Candidate: `{review['candidate_path']}`",
+        "",
+        "## Blockers",
+        "",
+    ]
+    if review["blockers"]:
+        for item in review["blockers"]:
+            lines.append(f"- **{item['severity']}** `{item['id']}`: {item['message']}")
+            if item["evidence"]:
+                lines.append(f"  Evidence: {item['evidence']}")
+    else:
+        lines.append("- No adoption blockers detected by deterministic checks.")
+    lines.extend(
+        [
+            "",
+            "## Score And Size",
+            "",
+            f"- Source score: {comparison['source']['score']} / 100",
+            f"- Candidate score: {comparison['candidate']['score']} / 100",
+            f"- Score delta: {deltas['score_delta']:+d}",
+            f"- Estimated token delta: {deltas['token_delta']:+d}",
+            f"- Critical/high finding delta: {deltas['critical_high_finding_delta']:+d}",
+            f"- Resolved findings: {deltas['resolved_finding_count']}",
+            f"- Introduced findings: {deltas['introduced_finding_count']}",
+            "",
+            "## Recommendation",
+            "",
+            review["recommendation"],
+            "",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def render_candidate_report(report: dict[str, Any]) -> str:
@@ -2919,6 +3335,89 @@ def command_compare_context(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_discover_context(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    report = discover_context_report(
+        root,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+    )
+    output_dir = Path(args.output_dir) if args.output_dir else root / ".contextproof"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "context-discovery.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "context-discovery.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_context_discovery_markdown(report), encoding="utf-8")
+    print(json.dumps(report, indent=2))
+    return 0
+
+
+def command_prepare_workflow(args: argparse.Namespace) -> int:
+    root = Path(args.repo).resolve()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else root / ".contextproof"
+    workflow = build_workflow_packet(
+        root,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+        output_dir=output_dir,
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    discovery = discover_context_report(root, deterministic=args.deterministic, project_mode=args.project_mode)
+    audit = audit_repo(root, deterministic=args.deterministic, project_mode=args.project_mode)
+    source = Path(workflow["source_path"])
+    route = build_optimizer_route(source, deterministic=args.deterministic, project_mode=args.project_mode)
+    classification = route["classification"]
+
+    (output_dir / "context-discovery.json").write_text(json.dumps(discovery, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "context-discovery.md").write_text(render_context_discovery_markdown(discovery), encoding="utf-8")
+    (output_dir / "report.json").write_text(json.dumps(audit, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "report.md").write_text(render_markdown_report(audit), encoding="utf-8")
+    (output_dir / "context-classification.json").write_text(json.dumps(classification, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "context-classification.md").write_text(render_classification_markdown(classification), encoding="utf-8")
+    (output_dir / "optimizer-route.json").write_text(json.dumps(route, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "optimizer-instructions.md").write_text(render_optimizer_route_markdown(route), encoding="utf-8")
+
+    json_out = Path(args.json_out) if args.json_out else output_dir / "workflow.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "workflow.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(workflow, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_workflow_markdown(workflow), encoding="utf-8")
+    print(json.dumps(workflow, indent=2))
+    return 0
+
+
+def command_review_candidate(args: argparse.Namespace) -> int:
+    source = Path(args.source)
+    candidate = Path(args.candidate)
+    if not source.exists():
+        raise ContextProofInputError(f"Source context path does not exist: {source}")
+    if not candidate.exists():
+        raise ContextProofInputError(f"Candidate context path does not exist: {candidate}")
+    comparison = compare_contexts(
+        source,
+        candidate,
+        deterministic=args.deterministic,
+        project_mode=args.project_mode,
+    )
+    review = build_candidate_review(comparison)
+    output_dir = Path(args.output_dir) if args.output_dir else context_output_dir(source.resolve())
+    output_dir.mkdir(parents=True, exist_ok=True)
+    json_out = Path(args.json_out) if args.json_out else output_dir / "candidate-review.json"
+    md_out = Path(args.md_out) if args.md_out else output_dir / "candidate-review.md"
+    json_out.parent.mkdir(parents=True, exist_ok=True)
+    md_out.parent.mkdir(parents=True, exist_ok=True)
+    json_out.write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
+    md_out.write_text(render_candidate_review_markdown(review), encoding="utf-8")
+    (output_dir / "candidate-report.json").write_text(json.dumps(comparison, indent=2) + "\n", encoding="utf-8")
+    (output_dir / "candidate-report.md").write_text(render_candidate_report(comparison), encoding="utf-8")
+    print(json.dumps(review, indent=2))
+    return 0
+
+
 def command_classify_context(args: argparse.Namespace) -> int:
     source = Path(args.source)
     if not source.exists():
@@ -3099,6 +3598,49 @@ def build_parser() -> argparse.ArgumentParser:
         help="Declare whether this is an existing, new, or migration project context.",
     )
     compare.set_defaults(func=command_compare_context)
+
+    discover = subparsers.add_parser("discover-context", help="Discover agent-facing context files in a repository.")
+    discover.add_argument("repo", nargs="?", default=".", help="Repository path.")
+    discover.add_argument("--json-out", help="Write JSON discovery report to this path.")
+    discover.add_argument("--md-out", help="Write markdown discovery report to this path.")
+    discover.add_argument("--output-dir", help="Write default discovery outputs to this directory.")
+    discover.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    discover.add_argument(
+        "--project-mode",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
+    )
+    discover.set_defaults(func=command_discover_context)
+
+    workflow = subparsers.add_parser("prepare-workflow", help="Prepare the one-prompt ContextProof optimization workflow packet.")
+    workflow.add_argument("repo", nargs="?", default=".", help="Repository path.")
+    workflow.add_argument("--json-out", help="Write JSON workflow report to this path.")
+    workflow.add_argument("--md-out", help="Write markdown workflow packet to this path.")
+    workflow.add_argument("--output-dir", help="Write default workflow outputs to this directory.")
+    workflow.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    workflow.add_argument(
+        "--project-mode",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
+    )
+    workflow.set_defaults(func=command_prepare_workflow)
+
+    review = subparsers.add_parser("review-candidate", help="Review whether a candidate agent context is safe to consider.")
+    review.add_argument("source", help="Original context file or repository directory.")
+    review.add_argument("candidate", help="Candidate context file or repository directory.")
+    review.add_argument("--json-out", help="Write JSON candidate review to this path.")
+    review.add_argument("--md-out", help="Write markdown candidate review to this path.")
+    review.add_argument("--output-dir", help="Write default candidate review outputs to this directory.")
+    review.add_argument("--deterministic", action="store_true", help="Normalize volatile metadata for snapshots.")
+    review.add_argument(
+        "--project-mode",
+        choices=["existing_project", "new_project", "migration_project", "existing_project_audit", "new_project_bootstrap"],
+        default="existing_project",
+        help="Declare whether this is an existing, new, or migration project context.",
+    )
+    review.set_defaults(func=command_review_candidate)
 
     classify = subparsers.add_parser("classify-context", help="Classify agent-context scenario and optimizer template.")
     classify.add_argument("source", help="Agent context file or repository directory.")

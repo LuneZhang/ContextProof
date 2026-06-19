@@ -11,7 +11,8 @@ Use Python 3.11 or newer.
 ```bash
 python -m pip install -e .
 python -m unittest discover -s tests
-python -m contextproof.cli audit . --pr-comment --minimize --deterministic
+python -m contextproof.cli prepare-workflow . --deterministic
+python scripts/acceptance_v06.py
 ```
 
 ## Pull Requests

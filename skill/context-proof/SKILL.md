@@ -28,45 +28,41 @@ documentation unless the user says they are injected into agent context.
 When the user asks to audit, tighten, optimize, reduce, or improve agent
 context:
 
-1. Run the local audit:
+1. Prepare the workflow packet:
 
    ```bash
-   python scripts/contextproof.py audit /path/to/repo --pr-comment
+   python scripts/contextproof.py prepare-workflow /path/to/repo
    ```
 
    Add `--project-mode new_project` for a fresh repository or
    `--project-mode migration_project` for multi-agent context migration.
 
-2. Choose the source context file or directory to optimize.
+2. Read `.contextproof/workflow.md` and `.contextproof/optimizer-instructions.md`.
+   These files identify the source context, selected route, template, candidate
+   path, preservation requirements, and no-overwrite rule.
 
-3. Route it to the selected optimizer template:
-
-   ```bash
-   python scripts/contextproof.py route-optimizer /path/to/source/AGENTS.md
-   ```
-
-4. Read only the references needed for the selected route:
+3. Read only the references needed for the selected route:
 
    - always read `references/context-optimizer.md`
    - read `references/classifier.md` only when route evidence is unclear
    - read the selected file under `references/templates/`
    - use `references/optimization-checklist.md` before recommending the result
 
-5. Draft the candidate under `.contextproof/candidates/`. Preserve source
+4. Draft the candidate under `.contextproof/candidates/`. Preserve source
    filenames when possible, for example
    `.contextproof/candidates/AGENTS.contextproof.md`.
 
-6. Never overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or
+5. Never overwrite `AGENTS.md`, `CLAUDE.md`, `.cursor/rules`, `SKILL.md`, or
    other source context files unless the user explicitly approves after seeing
    the candidate and comparison report.
 
-7. Compare original and candidate:
+6. Review the original and candidate:
 
    ```bash
-   python scripts/contextproof.py compare-context /path/to/source/AGENTS.md /path/to/repo/.contextproof/candidates/AGENTS.contextproof.md
+   python scripts/contextproof.py review-candidate /path/to/source/AGENTS.md /path/to/repo/.contextproof/candidates/AGENTS.contextproof.md
    ```
 
-8. Report:
+7. Report:
 
    - static score and critical/high findings
    - primary scenario and selected template
@@ -84,8 +80,7 @@ Treat regression flags as blockers until reviewed.
 - Say when no validation command was found.
 - Say when a candidate removed or negated a validation command, path anchor, or
   safety boundary.
-- Keep the user's normal workflow simple; mention benchmark, gold, and
-  calibration commands only for maintainers or fixture work.
+- Keep the user's normal workflow simple; mention benchmark, gold, and calibration commands only for maintainers.
 
 ## Maintainer Commands
 
@@ -95,7 +90,7 @@ Use these only for ContextProof development:
 python scripts/contextproof.py evaluate-gold SCENARIO_DIR CANDIDATE_PATH
 python scripts/contextproof.py benchmark-optimizer examples/scenarios
 python scripts/contextproof.py calibrate-scorer examples/calibration/cases.jsonl
-python scripts/acceptance_v05.py
+python scripts/acceptance_v06.py
 ```
 
 Gold references are benchmark fixtures only. Do not present them as automatic

@@ -13,4 +13,4 @@ benchmark:
 	python -m contextproof.cli summarize-runs examples/benchmark-runs.jsonl --md-out .contextproof/benchmark-summary.md
 
 acceptance:
-	python scripts/acceptance_v05.py
+	python scripts/acceptance_v06.py

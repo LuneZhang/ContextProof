@@ -1,5 +1,16 @@
 # Roadmap
 
+ContextProof has three separate development tracks:
+
+- product track: improve the installed skill and the normal user workflow
+- evaluation track: improve scorer, optimizer prompts, fixtures, and release
+  confidence
+- distribution track: improve installation and review surfaces
+
+The product track is primary. Evaluation and distribution work must not become
+required steps in the normal user workflow. See
+[Product Strategy](PRODUCT_STRATEGY.md) for the boundary.
+
 ## V0.1 Core
 
 Status: complete.
@@ -210,16 +221,59 @@ surface area.
 - Do not expand scenario templates.
 - Do not add CI, dashboard, hosted service, or LLM judge behavior.
 
-## V0.6 Agent Baselines And Scenario Expansion
+## V0.6 Skill Runtime UX And One-Prompt Optimization Flow
 
-- Helpers for collecting native `/init` outputs from supported agents where
-  stable workflows exist.
-- Larger existing-project, new-project, migration, safety, and token-heavy
-  scenario fixture sets.
-- Agent-specific overlays for Codex, Claude Code, OpenCode, Cursor, Windsurf,
-  Pi, Copilot, and similar tools.
-- Overlay scope is limited to loader paths, invocation style, and file-format
-  differences; core optimization logic stays scenario-driven.
+Status: complete.
+
+V0.6 should make ContextProof feel like one focused, installable skill rather
+than a command collection. The goal is to make the normal user path reliable:
+ask the active coding agent to audit and improve agent context, produce a
+candidate, compare it, and stop before overwriting source files.
+
+### Product Objective
+
+- A new user can install the skill and use one natural-language prompt to start
+  the full workflow.
+- ContextProof can discover likely agent-context files in a repository and
+  explain which files are in scope.
+- The workflow produces one clear work packet under `.contextproof/`: audit,
+  classification, optimizer instructions, candidate path, and comparison.
+- The active coding agent receives enough instructions to draft a good
+  candidate without reading maintainer-only benchmark material.
+- Candidate comparison remains the user's decision point. Source context files
+  are never overwritten by default.
+
+### Primary Deliverables
+
+- A single user-facing workflow command or skill-runner flow that performs:
+  discover -> audit -> classify -> route -> write optimizer packet.
+- Repository context discovery for supported agent files:
+  `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `.cursor/rules/*`,
+  `.github/copilot-instructions.md`, `SKILL.md`, MCP notes, and saved `/init`
+  briefs.
+- A concise `.contextproof/workflow.md` that tells the active coding agent
+  exactly what to do next and where to write candidates.
+- A consolidated comparison summary that is easier for users to review than
+  separate raw reports.
+- Stronger checks around no-overwrite behavior, source/candidate path hygiene,
+  missing validation commands, negated validation commands, and removed project
+  path anchors.
+- README, Chinese README, usage docs, and skill instructions updated around
+  the one-prompt flow.
+- Standalone skill runner support for v0.6 commands.
+- `scripts/acceptance_v06.py` or an equivalent extension that keeps v0.5
+  acceptance checks and adds one-prompt workflow checks.
+
+### Non-Goals For V0.6
+
+- Do not make users run gold evaluation, scorer calibration, benchmark
+  variants, or acceptance scripts.
+- Do not ask users to collect baselines for ContextProof development.
+- Do not automate external coding agents.
+- Do not add a hosted service, dashboard, or CI workflow.
+- Do not add business-domain or industry template libraries.
+- Do not claim real task-performance improvement from static scores.
+- Do not optimize ordinary Markdown that is not loaded as agent context.
 
 ## V0.7 Distribution And Review Surfaces
 

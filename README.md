@@ -22,7 +22,7 @@ or other context files.
 After the skill is installed:
 
 ```text
-Use $context-proof to audit and optimize this repository's agent context.
+Use $context-proof to prepare the workflow, audit, and optimize this repository's agent context.
 ```
 
 Expected local output:
@@ -30,10 +30,12 @@ Expected local output:
 ```text
 .contextproof/report.md
 .contextproof/pr-comment.md
+.contextproof/context-discovery.md
 .contextproof/context-classification.md
 .contextproof/optimizer-instructions.md
+.contextproof/workflow.md
 .contextproof/candidates/AGENTS.contextproof.md
-.contextproof/candidate-report.md
+.contextproof/candidate-review.md
 ```
 
 ## Install
@@ -73,13 +75,11 @@ files.
 ContextProof helps a coding agent improve persistent context without replacing
 the source file automatically:
 
-1. `audit`: finds vague, unsafe, contradictory, oversized, or hard-to-validate
-   instructions.
-2. `classify-context`: identifies the usage scenario.
-3. `route-optimizer`: selects a focused optimizer template.
-4. The coding agent drafts a candidate under `.contextproof/candidates/`.
-5. `compare-context`: checks score delta, token delta, preservation, and
-   regressions.
+1. `prepare-workflow`: discovers agent context, audits it, classifies the
+   scenario, routes the optimizer, and writes `.contextproof/workflow.md`.
+2. The coding agent drafts a candidate under `.contextproof/candidates/`.
+3. `review-candidate`: checks blockers, score delta, token delta,
+   preservation, and regressions before the user decides whether to adopt.
 
 Scenario routes:
 
@@ -97,6 +97,14 @@ the skill and a fallback for shell-capable agents.
 
 ```bash
 python -m pip install -e .
+contextproof prepare-workflow .
+contextproof review-candidate AGENTS.md .contextproof/candidates/AGENTS.contextproof.md
+```
+
+Lower-level commands remain available when an agent needs them:
+
+```bash
+contextproof discover-context .
 contextproof audit . --pr-comment
 contextproof classify-context AGENTS.md
 contextproof route-optimizer AGENTS.md
@@ -106,14 +114,13 @@ contextproof compare-context AGENTS.md .contextproof/candidates/AGENTS.contextpr
 Fresh repositories:
 
 ```bash
-contextproof audit . --project-mode new_project --pr-comment
-contextproof route-optimizer AGENTS.md --project-mode new_project
+contextproof prepare-workflow . --project-mode new_project
 ```
 
 Migration between agent surfaces:
 
 ```bash
-contextproof audit . --project-mode migration_project --pr-comment
+contextproof prepare-workflow . --project-mode migration_project
 ```
 
 ## What It Audits
@@ -165,7 +172,7 @@ contextproof calibrate-scorer examples/calibration/cases.jsonl \
 Run the full local acceptance flow:
 
 ```bash
-python scripts/acceptance_v05.py
+python scripts/acceptance_v06.py
 ```
 
 `make acceptance` is also available on systems with `make`.

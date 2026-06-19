@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.6.0
+
+- Added the one-prompt product workflow with `prepare-workflow`, which
+  discovers agent context, audits it, classifies the scenario, routes the
+  optimizer, and writes `.contextproof/workflow.md`.
+- Added `discover-context` for explaining which repository Markdown files are
+  in scope as agent-facing context and warning on README-only repositories.
+- Added `review-candidate`, a user-facing candidate adoption report that puts
+  unsafe regressions, removed or negated validation commands, removed path
+  anchors, new critical/high issues, and overcompression before score deltas.
+- Added `scripts/acceptance_v06.py` and moved `make acceptance` to the v0.6
+  acceptance flow while keeping v0.5 acceptance as a release sub-check.
+- Updated the standalone skill runner, README, Chinese README, usage docs, and
+  skill metadata around the one-prompt workflow.
+- Kept gold evaluation, scorer calibration, optimizer benchmark, and
+  acceptance scripts as maintainer-only development tools.
+- Package and skill metadata are `0.6.0`; report schema remains `0.5.0`.
+
 ## 0.5.1
 
 - Reworked the README and Chinese README around a shorter skill-first adoption

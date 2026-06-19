@@ -17,14 +17,16 @@ Goal:
   general Markdown optimizer.
 
 After installation, use the context-proof skill to audit and optimize this
-repository's agent context. Classify the source context first, route to the
-selected optimizer template, and then draft a candidate. Generate:
+repository's agent context. Prepare the workflow packet first, then draft a
+candidate from `.contextproof/workflow.md` and
+`.contextproof/optimizer-instructions.md`. Generate:
 - .contextproof/report.md
-- .contextproof/pr-comment.md
+- .contextproof/context-discovery.md
 - .contextproof/context-classification.md
 - .contextproof/optimizer-instructions.md
+- .contextproof/workflow.md
 - optimized candidate drafts under .contextproof/candidates/
-- .contextproof/candidate-report.md
+- .contextproof/candidate-review.md
 
 Do not overwrite AGENTS.md, CLAUDE.md, .cursor/rules, SKILL.md, or other
 existing context files.
@@ -33,14 +35,10 @@ If the skill needs a shell runner, install the repository in editable mode with:
 python -m pip install -e .
 
 If the contextproof command is unavailable, run:
-python -m contextproof.cli audit . --pr-comment
+python -m contextproof.cli prepare-workflow .
 
-Before drafting a candidate, route the source context with:
-python -m contextproof.cli classify-context SOURCE_CONTEXT_PATH
-python -m contextproof.cli route-optimizer SOURCE_CONTEXT_PATH
-
-After drafting a candidate, compare it with:
-python -m contextproof.cli compare-context SOURCE_CONTEXT_PATH CANDIDATE_CONTEXT_PATH
+After drafting a candidate, review it with:
+python -m contextproof.cli review-candidate SOURCE_CONTEXT_PATH CANDIDATE_CONTEXT_PATH
 
 When reviewing a PR that changes agent context files, preserve the generated
 .contextproof/pr-comment.md as the local review summary.
